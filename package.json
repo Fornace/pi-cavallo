@@ -1,0 +1,52 @@
+{
+  "name": "pi-cavallo",
+  "version": "1.0.0",
+  "description": "Generate and edit video in pi using Alibaba HappyHorse models (I2V, T2V, R2V, Video-Edit).",
+  "author": "Francesco Frapporti <effedue@gmail.com>",
+  "license": "MIT",
+  "type": "module",
+  "homepage": "https://github.com/Fornace/pi-cavallo#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Fornace/pi-cavallo.git"
+  },
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "alibaba",
+    "dashscope",
+    "happyhorse",
+    "video-generation",
+    "terminal"
+  ],
+  "files": [
+    "extensions",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "extensions/index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "^1.1.24"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "@types/node": "^22.0.0",
+    "jiti": "^2.7.0",
+    "typebox": "^1.1.24",
+    "typescript": "^6.0.3"
+  }
+}

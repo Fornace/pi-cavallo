@@ -1,0 +1,9 @@
+node_modules/
+_tmp/
+generated/
+assets/
+*.tgz
+.DS_Store
+.env
+.env.*
+!.env.example
