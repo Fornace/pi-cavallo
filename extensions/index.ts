@@ -144,17 +144,40 @@ export default function (pi: ExtensionAPI) {
 
 			const inputPayload: any = {};
 			if (params.prompt) inputPayload.prompt = params.prompt;
-			
-			if (params.imagePath) {
-				inputPayload.image_url = await loadReferenceFile(cwd, params.imagePath);
+
+			const media: Array<{ type: string; url: string }> = [];
+
+			if (model === "happyhorse-1.0-i2v" && params.imagePath) {
+				media.push({
+					type: "first_frame",
+					url: await loadReferenceFile(cwd, params.imagePath)
+				});
+			} else if (model === "happyhorse-1.0-r2v" && params.referenceImages?.length > 0) {
+				for (const ref of params.referenceImages) {
+					media.push({
+						type: "reference_image",
+						url: await loadReferenceFile(cwd, ref)
+					});
+				}
+			} else if (model === "happyhorse-1.0-video-edit") {
+				if (params.videoPath) {
+					media.push({
+						type: "video",
+						url: await loadReferenceFile(cwd, params.videoPath)
+					});
+				}
+				if (params.referenceImages?.length > 0) {
+					for (const ref of params.referenceImages) {
+						media.push({
+							type: "reference_image",
+							url: await loadReferenceFile(cwd, ref)
+						});
+					}
+				}
 			}
-			if (params.videoPath) {
-				inputPayload.video_url = await loadReferenceFile(cwd, params.videoPath);
-			}
-			if (params.referenceImages && params.referenceImages.length > 0) {
-				inputPayload.reference_urls = await Promise.all(
-					params.referenceImages.map((p: string) => loadReferenceFile(cwd, p))
-				);
+
+			if (media.length > 0) {
+				inputPayload.media = media;
 			}
 
 			let response;
