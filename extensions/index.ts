@@ -66,8 +66,11 @@ async function loadReferenceFile(cwd: string, pathArg: string): Promise<string> 
 	if (!SUPPORTED_INPUT_MIME.has(mimeType)) {
 		throw new Error(`Unsupported reference file type: ${mimeType}.`);
 	}
-	// For DashScope, if it accepts Data URIs:
 	const buf = await readFile(abs);
+	const sizeMB = buf.length / (1024 * 1024);
+	if (sizeMB > 50) {
+		console.warn(`[cavallo] Warning: ${abs} is ${sizeMB.toFixed(1)}MB. Large files are Base64-encoded into memory (~${(sizeMB * 1.33).toFixed(0)}MB). Consider using a public URL instead.`);
+	}
 	return `data:${mimeType};base64,${buf.toString("base64")}`;
 }
 
@@ -118,7 +121,7 @@ export default function (pi: ExtensionAPI) {
 			const mdTheme = getMarkdownTheme();
 			const encodedCmd = encodeURIComponent(`open -R "${outputPath}"`);
 			container.addChild(
-				new Markdown(`[📂 Reveal in Finder](command:bash?command=${encodedCmd})\n\`${outputPath}\``, 0, 0, mdTheme)
+				new Markdown(`[Reveal in Finder](command:bash?command=${encodedCmd})\n\`${outputPath}\``, 0, 0, mdTheme)
 			);
 		}
 
@@ -202,7 +205,7 @@ export default function (pi: ExtensionAPI) {
 				description: "Path to input video clip for video continuation using I2V model.",
 			})),
 			audioPath: Type.Optional(Type.String({
-				description: "Path/URL to audio file. Note: The API only supports public HTTP/HTTPS URLs for audio, not local files.",
+				description: "Public HTTP/HTTPS URL to an audio file for audio-driven video. Local file paths are not supported by the DashScope API.",
 			})),
 			referenceImages: Type.Optional(Type.Array(Type.String(), {
 				description: "Paths to reference images for R2V or Video-Edit models.",
@@ -257,6 +260,30 @@ export default function (pi: ExtensionAPI) {
 
 			const cwd = ctx.cwd;
 			const model = params.model ?? "happyhorse-1.0-t2v";
+
+			// Model-specific input validation
+			if (model.includes("-i2v") && !params.imagePath && !params.firstClipPath) {
+				throw new Error(`Model ${model} requires either imagePath or firstClipPath.`);
+			}
+			if (model.includes("-videoedit") && !params.videoPath) {
+				throw new Error(`Model ${model} requires videoPath.`);
+			}
+			if (model.includes("-r2v") && (!params.referenceImages || params.referenceImages.length === 0)) {
+				throw new Error(`Model ${model} requires referenceImages (1-9 image paths).`);
+			}
+
+			// Audio path must be a public URL
+			if (params.audioPath && !params.audioPath.startsWith("http://") && !params.audioPath.startsWith("https://")) {
+				throw new Error(`audioPath must be a public HTTP/HTTPS URL. Local files are not supported by the DashScope API. Got: ${params.audioPath}`);
+			}
+
+			// Duration validation: HappyHorse requires 3-15, Wan2.7 allows 2-15
+			if (params.duration !== undefined) {
+				const minDur = model.startsWith("happyhorse") ? 3 : 2;
+				if (params.duration < minDur || params.duration > 15) {
+					throw new Error(`Duration must be ${minDur}-15 seconds for ${model}. Got: ${params.duration}`);
+				}
+			}
 			
 			if (ctx.hasUI) {
 				ctx.ui.setWorkingIndicator({
@@ -350,13 +377,13 @@ export default function (pi: ExtensionAPI) {
 				});
 			} catch (err: any) {
 				if (ctx.hasUI) ctx.ui.setWorkingIndicator();
-				throw new Error(`DashScope API connection error: ${err?.message ?? String(err)}`);
+				throw new Error(`[${model}] DashScope API connection error: ${err?.message ?? String(err)}`);
 			}
 
 			if (!response.ok) {
 				const errText = await response.text();
 				if (ctx.hasUI) ctx.ui.setWorkingIndicator();
-				throw new Error(`DashScope API error (${response.status}): ${errText}`);
+				throw new Error(`[${model}] DashScope API error (${response.status}): ${errText}`);
 			}
 
 			const data: any = await response.json();
@@ -380,6 +407,7 @@ export default function (pi: ExtensionAPI) {
 					updateStatus(`Cavallo: Polling...`);
 					let videoUrl: string | undefined;
 					let taskMetrics: any = {};
+					let lastReportedStatus = "";
 					
 					while (true) {
 						await new Promise(r => setTimeout(r, 10000)); // Poll every 10s
@@ -389,7 +417,7 @@ export default function (pi: ExtensionAPI) {
 						});
 						if (!pollRes.ok) {
 							const errText = await pollRes.text();
-							throw new Error(`Polling error (${pollRes.status}): ${errText}`);
+							throw new Error(`[${model}] Polling error (${pollRes.status}): ${errText}`);
 						}
 						const pollData: any = await pollRes.json();
 						const status = pollData?.output?.task_status;
@@ -401,10 +429,17 @@ export default function (pi: ExtensionAPI) {
 						} else if (status === "FAILED") {
 							const code = pollData?.output?.code;
 							const message = pollData?.output?.message;
-							throw new Error(`${code} - ${message}`);
+							throw new Error(`[${model}] ${code} - ${message}`);
 						}
 						
-						updateStatus(`Cavallo: ${status}...`);
+						if (status && status !== lastReportedStatus) {
+							lastReportedStatus = status;
+							updateStatus(`Cavallo: ${status}...`);
+							onUpdate?.({
+								content: [{ type: "text", text: `Task ${taskId}: ${status}` }],
+								details: { ...params, model, taskId, status, progress: `Generation ${status.toLowerCase()}...` },
+							});
+						}
 					}
 
 					if (!videoUrl) {
@@ -428,8 +463,10 @@ export default function (pi: ExtensionAPI) {
 						await execFileAsync("ffmpeg", ["-y", "-i", outPath, "-vframes", "1", "-f", "image2", "-vcodec", "mjpeg", thumbPath]);
 						const thumbBuf = await readFile(thumbPath);
 						thumbData = thumbBuf.toString("base64");
-					} catch (err) {
-						// ignore
+					} catch (err: any) {
+						if (err?.code === "ENOENT" || err?.message?.includes("ENOENT")) {
+							console.warn("[cavallo] ffmpeg not found. Install ffmpeg for video thumbnail previews.");
+						}
 					}
 
 					updateStatus(undefined);
@@ -478,61 +515,12 @@ export default function (pi: ExtensionAPI) {
 				return container;
 			}
 
-			// (Dead code below if we only return "Background" from execute, but preserved if it ever runs synchronously)
+			// Dead code path: execute() always returns Background status.
+			// Completed results are rendered by the registered "cavallo_result" message renderer
+			// via pi.sendMessage() in the background task.
 			container.addChild(
 				new Text(theme.fg("success", (result.content[0] as any)?.text || "Success!"), 0, 0)
 			);
-
-			if (!details) return container;
-
-			const {
-				model,
-				prompt,
-				imagePath,
-				videoPath,
-				referenceImages,
-				outputPath,
-				taskId,
-				videoUrl,
-				metrics,
-			} = details as any;
-
-			container.addChild(new Spacer(1));
-
-			const settingsBox = new Box(1, 1, (s) => theme.bg("customMessageBg", s));
-			const settingsContainer = new Container();
-
-			settingsContainer.addChild(
-				new Text(theme.fg("accent", theme.bold("CAVALLO DETAILS")), 0, 0)
-			);
-			settingsContainer.addChild(new Spacer(1));
-
-			const addSetting = (label: string, value: string) => {
-				settingsContainer.addChild(
-					new Text(
-						theme.fg("muted", label.padEnd(10)) + theme.fg("text", String(value)),
-						0,
-						0
-					)
-				);
-			};
-
-			if (model) addSetting("Model", model);
-			if (prompt) addSetting("Prompt", prompt);
-			if (imagePath) addSetting("Image", imagePath);
-			if (videoPath) addSetting("Video", videoPath);
-			if (referenceImages && referenceImages.length > 0) {
-				addSetting("Refs", Array.isArray(referenceImages) ? referenceImages.join(", ") : referenceImages);
-			}
-			if (taskId) addSetting("Task ID", taskId);
-			if (metrics?.duration) addSetting("Duration", `${metrics.duration}s`);
-			if (metrics?.SR) addSetting("Resolution", `${metrics.SR}P`);
-			if (outputPath) addSetting("Saved To", outputPath);
-			if (videoUrl) addSetting("URL", videoUrl);
-
-			settingsBox.addChild(settingsContainer);
-			container.addChild(settingsBox);
-
 			return container;
 		},
 	});
