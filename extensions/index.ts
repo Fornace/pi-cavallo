@@ -155,13 +155,13 @@ export default function (pi: ExtensionAPI) {
 			
 			if (ctx.hasUI) {
 				ctx.ui.setWorkingIndicator({
-					frames: ["🐎 ", " 🐎", "  🐎", "   🐎", "  🐎", " 🐎"],
-					intervalMs: 150
+					frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+					intervalMs: 80
 				});
 			}
 
 			onUpdate?.({
-				content: [{ type: "text", text: `🎬 Submitting video generation task to ${model}…` }],
+				content: [{ type: "text", text: `Submitting video generation task to ${model}…` }],
 				details: { ...params, status: "Submitting", progress: "Submitting to DashScope..." },
 			});
 
@@ -248,7 +248,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			onUpdate?.({
-				content: [{ type: "text", text: `⏳ Task ${taskId} submitted. Polling for completion…` }],
+				content: [{ type: "text", text: `Task ${taskId} submitted. Polling for completion…` }],
 				details: { ...params, taskId, status: "Polling", progress: "Waiting for video generation..." },
 			});
 
@@ -285,7 +285,7 @@ export default function (pi: ExtensionAPI) {
 				}
 				
 				onUpdate?.({
-					content: [{ type: "text", text: `⏳ Task ${taskId} is ${status}…` }],
+					content: [{ type: "text", text: `Task ${taskId} is ${status}…` }],
 					details: { ...params, taskId, status, progress: "Checking DashScope..." },
 				});
 			}
@@ -301,7 +301,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			onUpdate?.({
-				content: [{ type: "text", text: `📥 Downloading video from ${videoUrl}…` }],
+				content: [{ type: "text", text: `Downloading video from ${videoUrl}…` }],
 				details: { ...params, taskId, status: "Downloading", progress: "Downloading..." },
 			});
 
@@ -319,7 +319,7 @@ export default function (pi: ExtensionAPI) {
 
 			return {
 				content: [
-					{ type: "text", text: `✅ Video generated successfully: ${outPath}` },
+					{ type: "text", text: `Video generated successfully: ${outPath}` },
 				],
 				details: {
 					...params,
@@ -360,7 +360,7 @@ export default function (pi: ExtensionAPI) {
 			const settingsContainer = new Container();
 
 			settingsContainer.addChild(
-				new Text(theme.fg("accent", theme.bold("🎬 CAVALLO DETAILS")), 0, 0)
+				new Text(theme.fg("accent", theme.bold("CAVALLO DETAILS")), 0, 0)
 			);
 			settingsContainer.addChild(new Spacer(1));
 
