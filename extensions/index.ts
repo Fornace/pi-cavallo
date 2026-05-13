@@ -7,10 +7,10 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Container, Text, Box, Spacer } from "@earendil-works/pi-tui";
 
 const MODELS = [
-	"happyhorse-t2v",
-	"happyhorse-i2v",
-	"happyhorse-r2v",
-	"happyhorse-video-edit",
+	"happyhorse-1.0-t2v",
+	"happyhorse-1.0-i2v",
+	"happyhorse-1.0-r2v",
+	"happyhorse-1.0-video-edit",
 ] as const;
 
 const SUPPORTED_INPUT_MIME = new Set([
@@ -86,15 +86,15 @@ export default function (pi: ExtensionAPI) {
 			"Generate or edit videos using Alibaba HappyHorse models (I2V, T2V, R2V).",
 		promptGuidelines: [
 			"Call cavallo_video when the user asks to create or edit a video.",
-			"Use 'happyhorse-t2v' for Text-to-Video.",
-			"Use 'happyhorse-i2v' for Image-to-Video. Pass an image path in `imagePath`.",
-			"Use 'happyhorse-r2v' to generate video from up to 9 reference images. Pass paths in `referenceImages`.",
-			"Use 'happyhorse-video-edit' to edit a video. Pass the input video in `videoPath` and reference images in `referenceImages` if needed.",
+			"Use 'happyhorse-1.0-t2v' for Text-to-Video.",
+			"Use 'happyhorse-1.0-i2v' for Image-to-Video. Pass an image path in `imagePath`.",
+			"Use 'happyhorse-1.0-r2v' to generate video from up to 9 reference images. Pass paths in `referenceImages`.",
+			"Use 'happyhorse-1.0-video-edit' to edit a video. Pass the input video in `videoPath` and reference images in `referenceImages` if needed.",
 		],
 		parameters: Type.Object({
 			model: StringEnum(MODELS, {
 				description: "The HappyHorse model to use.",
-				default: "happyhorse-t2v",
+				default: "happyhorse-1.0-t2v",
 			}),
 			prompt: Type.Optional(Type.String({
 				description: "Natural language instructions for generation or edit.",
@@ -135,7 +135,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const cwd = ctx.cwd;
-			const model = params.model ?? "happyhorse-t2v";
+			const model = params.model ?? "happyhorse-1.0-t2v";
 			
 			onUpdate?.({
 				content: [{ type: "text", text: `🎬 Submitting video generation task to ${model}…` }],
