@@ -153,9 +153,16 @@ export default function (pi: ExtensionAPI) {
 			const cwd = ctx.cwd;
 			const model = params.model ?? "happyhorse-1.0-t2v";
 			
+			if (ctx.hasUI) {
+				ctx.ui.setWorkingIndicator({
+					frames: ["🐎 ", " 🐎", "  🐎", "   🐎", "  🐎", " 🐎"],
+					intervalMs: 150
+				});
+			}
+
 			onUpdate?.({
 				content: [{ type: "text", text: `🎬 Submitting video generation task to ${model}…` }],
-				details: { ...params, status: "Submitting" },
+				details: { ...params, status: "Submitting", progress: "Submitting to DashScope..." },
 			});
 
 			const inputPayload: any = {};
@@ -223,23 +230,26 @@ export default function (pi: ExtensionAPI) {
 					signal
 				});
 			} catch (err: any) {
+				if (ctx.hasUI) ctx.ui.setWorkingIndicator();
 				throw new Error(`DashScope API connection error: ${err?.message ?? String(err)}`);
 			}
 
 			if (!response.ok) {
 				const errText = await response.text();
+				if (ctx.hasUI) ctx.ui.setWorkingIndicator();
 				throw new Error(`DashScope API error (${response.status}): ${errText}`);
 			}
 
 			const data: any = await response.json();
 			const taskId = data?.output?.task_id;
 			if (!taskId) {
+				if (ctx.hasUI) ctx.ui.setWorkingIndicator();
 				throw new Error(`Failed to retrieve task_id. Response: ${JSON.stringify(data)}`);
 			}
 
 			onUpdate?.({
 				content: [{ type: "text", text: `⏳ Task ${taskId} submitted. Polling for completion…` }],
-				details: { ...params, taskId, status: "Polling" },
+				details: { ...params, taskId, status: "Polling", progress: "Waiting for video generation..." },
 			});
 
 			// Polling
@@ -255,6 +265,7 @@ export default function (pi: ExtensionAPI) {
 				});
 				if (!pollRes.ok) {
 					const errText = await pollRes.text();
+					if (ctx.hasUI) ctx.ui.setWorkingIndicator();
 					throw new Error(`DashScope Polling error (${pollRes.status}): ${errText}`);
 				}
 				const pollData: any = await pollRes.json();
@@ -269,6 +280,7 @@ export default function (pi: ExtensionAPI) {
 				} else if (status === "FAILED") {
 					const code = pollData?.output?.code;
 					const message = pollData?.output?.message;
+					if (ctx.hasUI) ctx.ui.setWorkingIndicator(); // restore default
 					throw new Error(`Task failed: ${code} - ${message}`);
 				}
 				
@@ -279,24 +291,31 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (signal?.aborted) {
+				if (ctx.hasUI) ctx.ui.setWorkingIndicator(); // restore default
 				return { content: [{ type: "text", text: "Cancelled." }], details: {} };
 			}
 
 			if (!videoUrl) {
+				if (ctx.hasUI) ctx.ui.setWorkingIndicator(); // restore default
 				throw new Error("Task succeeded but no video_url was returned.");
 			}
 
 			onUpdate?.({
 				content: [{ type: "text", text: `📥 Downloading video from ${videoUrl}…` }],
-				details: { ...params, taskId, status: "Downloading" },
+				details: { ...params, taskId, status: "Downloading", progress: "Downloading..." },
 			});
 
 			const outPath = await resolveOutputPath(cwd, params.prompt, params.outputPath);
 			const videoRes = await fetch(videoUrl, { signal });
-			if (!videoRes.ok) throw new Error(`Failed to download video: ${videoRes.statusText}`);
+			if (!videoRes.ok) {
+				if (ctx.hasUI) ctx.ui.setWorkingIndicator(); // restore default
+				throw new Error(`Failed to download video: ${videoRes.statusText}`);
+			}
 			
 			const arrayBuf = await videoRes.arrayBuffer();
 			await writeFile(outPath, Buffer.from(arrayBuf));
+
+			if (ctx.hasUI) ctx.ui.setWorkingIndicator(); // restore default
 
 			return {
 				content: [
