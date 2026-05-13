@@ -1,16 +1,24 @@
 import { resolve, isAbsolute, extname } from "path";
 import { existsSync } from "fs";
 import { readFile, mkdir, writeFile } from "fs/promises";
-import { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import { ExtensionAPI, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { Container, Text, Box, Spacer } from "@earendil-works/pi-tui";
+import { Container, Text, Box, Spacer, Image, Markdown } from "@earendil-works/pi-tui";
+
+const execFileAsync = promisify(execFile);
 
 const MODELS = [
 	"happyhorse-1.0-t2v",
 	"happyhorse-1.0-i2v",
 	"happyhorse-1.0-r2v",
 	"happyhorse-1.0-video-edit",
+	"wan2.7-t2v",
+	"wan2.7-i2v-2026-04-25",
+	"wan2.7-r2v",
+	"wan2.7-videoedit",
 ] as const;
 
 const SUPPORTED_INPUT_MIME = new Set([
@@ -96,7 +104,23 @@ export default function (pi: ExtensionAPI) {
 			taskId,
 			videoUrl,
 			metrics,
+			thumbData
 		} = details as any;
+
+		if (thumbData) {
+			container.addChild(
+				new Image(thumbData, "image/jpeg", { ...theme, fallbackColor: (s) => theme.fg("muted", s) }, { maxWidthCells: 40, maxHeightCells: 20 })
+			);
+			container.addChild(new Spacer(1));
+		}
+
+		if (outputPath) {
+			const mdTheme = getMarkdownTheme();
+			const encodedCmd = encodeURIComponent(`open -R "${outputPath}"`);
+			container.addChild(
+				new Markdown(`[📂 Reveal in Finder](command:bash?command=${encodedCmd})\n\`${outputPath}\``, 0, 0, mdTheme)
+			);
+		}
 
 		container.addChild(new Spacer(1));
 
@@ -147,10 +171,12 @@ export default function (pi: ExtensionAPI) {
 			"Generate or edit videos using Alibaba HappyHorse models (I2V, T2V, R2V).",
 		promptGuidelines: [
 			"Call cavallo_video when the user asks to create or edit a video.",
-			"Use 'happyhorse-1.0-t2v' for Text-to-Video.",
-			"Use 'happyhorse-1.0-i2v' for Image-to-Video. Pass an image path in `imagePath`.",
-			"Use 'happyhorse-1.0-r2v' to generate video from up to 9 reference images. Pass paths in `referenceImages`.",
-			"Use 'happyhorse-1.0-video-edit' to edit a video. Pass the input video in `videoPath` and reference images in `referenceImages` if needed.",
+			"Use 'happyhorse-1.0-t2v' or 'wan2.7-t2v' for Text-to-Video.",
+			"Use 'happyhorse-1.0-i2v' or 'wan2.7-i2v-2026-04-25' for Image-to-Video. Pass an image path in `imagePath`.",
+			"Use 'happyhorse-1.0-r2v' or 'wan2.7-r2v' to generate video from up to 9 reference images. Pass paths in `referenceImages`.",
+			"Use 'happyhorse-1.0-video-edit' or 'wan2.7-videoedit' to edit a video. Pass the input video in `videoPath` and reference images in `referenceImages` if needed.",
+			"For Wan2.7, you can provide an `audioPath` for text-to-video and image-to-video models to drive the video with audio.",
+			"For Wan2.7 Image-to-Video, you can use `lastImagePath` and `firstClipPath` to provide end-frames or starting clips.",
 		],
 		parameters: Type.Object({
 			model: StringEnum(MODELS, {
@@ -160,30 +186,48 @@ export default function (pi: ExtensionAPI) {
 			prompt: Type.Optional(Type.String({
 				description: "Natural language instructions for generation or edit.",
 			})),
+			negativePrompt: Type.Optional(Type.String({
+				description: "Natural language instructions for what to exclude from the video.",
+			})),
 			imagePath: Type.Optional(Type.String({
-				description: "Path to input image for I2V model.",
+				description: "Path to input image (first frame) for I2V model.",
+			})),
+			lastImagePath: Type.Optional(Type.String({
+				description: "Path to last frame image for I2V model.",
 			})),
 			videoPath: Type.Optional(Type.String({
 				description: "Path to input video for Video-Edit model.",
+			})),
+			firstClipPath: Type.Optional(Type.String({
+				description: "Path to input video clip for video continuation using I2V model.",
+			})),
+			audioPath: Type.Optional(Type.String({
+				description: "Path/URL to audio file. Note: The API only supports public HTTP/HTTPS URLs for audio, not local files.",
 			})),
 			referenceImages: Type.Optional(Type.Array(Type.String(), {
 				description: "Paths to reference images for R2V or Video-Edit models.",
 			})),
 			aspectRatio: Type.Optional(StringEnum(["16:9", "9:16", "1:1", "4:3", "3:4", "4:5", "5:4"], {
-				description: "Aspect ratio of the generated video (only applies to happyhorse-1.0-t2v and happyhorse-1.0-r2v).",
+				description: "Aspect ratio of the generated video (only applies to t2v and r2v models).",
 			})),
 			resolution: Type.Optional(StringEnum(["720P", "1080P"], {
 				description: "Resolution of the generated video. Default is 720P for faster/cheaper generation.",
 			})),
 			duration: Type.Optional(Type.Integer({
-				description: "Duration of the generated video in seconds (3 to 15). Default is 5.",
-				minimum: 3,
+				description: "Duration of the generated video in seconds (2 to 15). Default is 5.",
+				minimum: 2,
 				maximum: 15
 			})),
 			seed: Type.Optional(Type.Integer({
 				description: "Random seed for reproducibility [0, 2147483647].",
 				minimum: 0,
 				maximum: 2147483647
+			})),
+			promptExtend: Type.Optional(Type.Boolean({
+				description: "Enable intelligent prompt rewriting (adds latency, default true).",
+			})),
+			watermark: Type.Optional(Type.Boolean({
+				description: "Add AI Generated watermark to the video (default true).",
 			})),
 			outputPath: Type.Optional(Type.String({
 				description: "Optional output path for the generated video. Defaults to ./generated/<slug>-<timestamp>.mp4",
@@ -237,39 +281,53 @@ export default function (pi: ExtensionAPI) {
 			if (params.seed !== undefined) {
 				parametersPayload.seed = params.seed;
 			}
-			if (params.aspectRatio !== undefined && (model === "happyhorse-1.0-t2v" || model === "happyhorse-1.0-r2v")) {
+			if (params.promptExtend !== undefined) {
+				parametersPayload.prompt_extend = params.promptExtend;
+			}
+			if (params.watermark !== undefined) {
+				parametersPayload.watermark = params.watermark;
+			}
+			if (params.aspectRatio !== undefined && (model.includes("-t2v") || model.includes("-r2v"))) {
 				parametersPayload.ratio = params.aspectRatio;
 			}
 
 			if (params.prompt) inputPayload.prompt = params.prompt;
+			if (params.negativePrompt) inputPayload.negative_prompt = params.negativePrompt;
+			if (params.audioPath && model.includes("-t2v")) inputPayload.audio_url = params.audioPath;
 
-			const media: Array<{ type: string; url: string }> = [];
+			const media: Array<{ type: string; url?: string; reference_voice?: string }> = [];
 
-			if (model === "happyhorse-1.0-i2v" && params.imagePath) {
-				media.push({
-					type: "first_frame",
-					url: await loadReferenceFile(cwd, params.imagePath)
-				});
-			} else if (model === "happyhorse-1.0-r2v" && params.referenceImages?.length > 0) {
-				for (const ref of params.referenceImages) {
-					media.push({
-						type: "reference_image",
-						url: await loadReferenceFile(cwd, ref)
-					});
+			if (model.includes("-i2v")) {
+				if (params.imagePath) {
+					media.push({ type: "first_frame", url: await loadReferenceFile(cwd, params.imagePath) });
 				}
-			} else if (model === "happyhorse-1.0-video-edit") {
+				if (params.lastImagePath) {
+					media.push({ type: "last_frame", url: await loadReferenceFile(cwd, params.lastImagePath) });
+				}
+				if (params.firstClipPath) {
+					media.push({ type: "first_clip", url: await loadReferenceFile(cwd, params.firstClipPath) });
+				}
+				if (params.audioPath) {
+					media.push({ type: "driving_audio", url: params.audioPath });
+				}
+			} else if (model.includes("-r2v") && (params.referenceImages?.length ?? 0) > 0) {
+				// We attach reference_voice to the first reference image if audioPath is provided
+				let attachedVoice = false;
+				for (const ref of (params.referenceImages || [])) {
+					const mediaItem: any = { type: "reference_image", url: await loadReferenceFile(cwd, ref) };
+					if (!attachedVoice && params.audioPath) {
+						mediaItem.reference_voice = params.audioPath;
+						attachedVoice = true;
+					}
+					media.push(mediaItem);
+				}
+			} else if (model.includes("-videoedit")) {
 				if (params.videoPath) {
-					media.push({
-						type: "video",
-						url: await loadReferenceFile(cwd, params.videoPath)
-					});
+					media.push({ type: "video", url: await loadReferenceFile(cwd, params.videoPath) });
 				}
-				if (params.referenceImages?.length > 0) {
-					for (const ref of params.referenceImages) {
-						media.push({
-							type: "reference_image",
-							url: await loadReferenceFile(cwd, ref)
-						});
+				if ((params.referenceImages?.length ?? 0) > 0) {
+					for (const ref of (params.referenceImages || [])) {
+						media.push({ type: "reference_image", url: await loadReferenceFile(cwd, ref) });
 					}
 				}
 			}
@@ -364,10 +422,21 @@ export default function (pi: ExtensionAPI) {
 					const arrayBuf = await videoRes.arrayBuffer();
 					await writeFile(outPath, Buffer.from(arrayBuf));
 
+					let thumbData: string | undefined;
+					try {
+						const thumbPath = `${outPath}.thumb.jpg`;
+						await execFileAsync("ffmpeg", ["-y", "-i", outPath, "-vframes", "1", "-f", "image2", "-vcodec", "mjpeg", thumbPath]);
+						const thumbBuf = await readFile(thumbPath);
+						thumbData = thumbBuf.toString("base64");
+					} catch (err) {
+						// ignore
+					}
+
 					updateStatus(undefined);
 
-					ctx.sendMessage({
+					pi.sendMessage({
 						customType: "cavallo_result",
+						display: true,
 						content: [{ type: "text", text: `Video generated successfully: ${outPath}` }],
 						details: {
 							...params,
@@ -376,7 +445,8 @@ export default function (pi: ExtensionAPI) {
 							status: "Done",
 							videoUrl,
 							outputPath: outPath,
-							metrics: taskMetrics
+							metrics: taskMetrics,
+							thumbData
 						}
 					});
 				} catch (err: any) {
@@ -398,7 +468,7 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		renderResult(result, _options, theme) {
-			const { details } = result;
+			const details = result.details as any;
 			const container = new Container();
 
 			if (details?.status === "Background") {
