@@ -108,6 +108,22 @@ export default function (pi: ExtensionAPI) {
 			referenceImages: Type.Optional(Type.Array(Type.String(), {
 				description: "Paths to reference images for R2V or Video-Edit models.",
 			})),
+			aspectRatio: Type.Optional(StringEnum(["16:9", "9:16", "1:1", "4:3", "3:4", "4:5", "5:4"], {
+				description: "Aspect ratio of the generated video (only applies to happyhorse-1.0-t2v and happyhorse-1.0-r2v).",
+			})),
+			resolution: Type.Optional(StringEnum(["720P", "1080P"], {
+				description: "Resolution of the generated video. Default is 720P for faster/cheaper generation.",
+			})),
+			duration: Type.Optional(Type.Integer({
+				description: "Duration of the generated video in seconds (3 to 15). Default is 5.",
+				minimum: 3,
+				maximum: 15
+			})),
+			seed: Type.Optional(Type.Integer({
+				description: "Random seed for reproducibility [0, 2147483647].",
+				minimum: 0,
+				maximum: 2147483647
+			})),
 			outputPath: Type.Optional(Type.String({
 				description: "Optional output path for the generated video. Defaults to ./generated/<slug>-<timestamp>.mp4",
 			})),
@@ -143,6 +159,20 @@ export default function (pi: ExtensionAPI) {
 			});
 
 			const inputPayload: any = {};
+			const parametersPayload: any = {
+				resolution: params.resolution ?? "720P",
+			};
+
+			if (params.duration !== undefined) {
+				parametersPayload.duration = params.duration;
+			}
+			if (params.seed !== undefined) {
+				parametersPayload.seed = params.seed;
+			}
+			if (params.aspectRatio !== undefined && (model === "happyhorse-1.0-t2v" || model === "happyhorse-1.0-r2v")) {
+				parametersPayload.ratio = params.aspectRatio;
+			}
+
 			if (params.prompt) inputPayload.prompt = params.prompt;
 
 			const media: Array<{ type: string; url: string }> = [];
@@ -189,7 +219,7 @@ export default function (pi: ExtensionAPI) {
 						"X-DashScope-Async": "enable",
 						"Content-Type": "application/json"
 					},
-					body: JSON.stringify({ model, input: inputPayload }),
+					body: JSON.stringify({ model, input: inputPayload, parameters: parametersPayload }),
 					signal
 				});
 			} catch (err: any) {
@@ -214,8 +244,10 @@ export default function (pi: ExtensionAPI) {
 
 			// Polling
 			let videoUrl: string | undefined;
+			let taskMetrics: any = {};
+			
 			while (!signal?.aborted) {
-				await new Promise(r => setTimeout(r, 5000));
+				await new Promise(r => setTimeout(r, 10000)); // Poll every 10s
 				
 				const pollRes = await fetch(`https://dashscope-intl.aliyuncs.com/api/v1/tasks/${taskId}`, {
 					headers: { "Authorization": `Bearer ${apiKey}` },
@@ -230,6 +262,9 @@ export default function (pi: ExtensionAPI) {
 				
 				if (status === "SUCCEEDED") {
 					videoUrl = pollData?.output?.video_url;
+					if (pollData?.usage) {
+						taskMetrics = pollData.usage;
+					}
 					break;
 				} else if (status === "FAILED") {
 					const code = pollData?.output?.code;
@@ -239,7 +274,7 @@ export default function (pi: ExtensionAPI) {
 				
 				onUpdate?.({
 					content: [{ type: "text", text: `⏳ Task ${taskId} is ${status}…` }],
-					details: { ...params, taskId, status },
+					details: { ...params, taskId, status, progress: "Checking DashScope..." },
 				});
 			}
 
@@ -273,6 +308,7 @@ export default function (pi: ExtensionAPI) {
 					status: "Done",
 					videoUrl,
 					outputPath: outPath,
+					metrics: taskMetrics
 				},
 			};
 		},
@@ -296,6 +332,7 @@ export default function (pi: ExtensionAPI) {
 				outputPath,
 				taskId,
 				videoUrl,
+				metrics,
 			} = details as any;
 
 			container.addChild(new Spacer(1));
@@ -326,6 +363,8 @@ export default function (pi: ExtensionAPI) {
 				addSetting("Refs", Array.isArray(referenceImages) ? referenceImages.join(", ") : referenceImages);
 			}
 			if (taskId) addSetting("Task ID", taskId);
+			if (metrics?.duration) addSetting("Duration", `${metrics.duration}s`);
+			if (metrics?.SR) addSetting("Resolution", `${metrics.SR}P`);
 			if (outputPath) addSetting("Saved To", outputPath);
 			if (videoUrl) addSetting("URL", videoUrl);
 
