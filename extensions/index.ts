@@ -182,7 +182,7 @@ export default function (pi: ExtensionAPI) {
 
 			let response;
 			try {
-				response = await fetch("https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis", {
+				response = await fetch("https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis", {
 					method: "POST",
 					headers: {
 						"Authorization": `Bearer ${apiKey}`,
@@ -217,7 +217,7 @@ export default function (pi: ExtensionAPI) {
 			while (!signal?.aborted) {
 				await new Promise(r => setTimeout(r, 5000));
 				
-				const pollRes = await fetch(`https://dashscope.aliyuncs.com/api/v1/tasks/${taskId}`, {
+				const pollRes = await fetch(`https://dashscope-intl.aliyuncs.com/api/v1/tasks/${taskId}`, {
 					headers: { "Authorization": `Bearer ${apiKey}` },
 					signal
 				});
