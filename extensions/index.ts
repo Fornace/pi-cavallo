@@ -112,7 +112,7 @@ export default function (pi: ExtensionAPI) {
 
 		if (thumbData) {
 			container.addChild(
-				new Image(thumbData, "image/jpeg", { ...theme, fallbackColor: (s) => theme.fg("muted", s) }, { maxWidthCells: 40, maxHeightCells: 20 })
+				new Image(thumbData, "image/jpeg", { ...theme, fallbackColor: (s) => theme.fg("muted", s) }, { maxWidthCells: 20, maxHeightCells: 14 })
 			);
 			container.addChild(new Spacer(1));
 		}
@@ -460,7 +460,7 @@ export default function (pi: ExtensionAPI) {
 					let thumbData: string | undefined;
 					try {
 						const thumbPath = `${outPath}.thumb.jpg`;
-						await execFileAsync("ffmpeg", ["-y", "-i", outPath, "-vframes", "1", "-f", "image2", "-vcodec", "mjpeg", thumbPath]);
+						await execFileAsync("ffmpeg", ["-y", "-i", outPath, "-vframes", "1", "-vf", "scale=160:-1", "-f", "image2", "-vcodec", "mjpeg", "-q:v", "3", thumbPath]);
 						const thumbBuf = await readFile(thumbPath);
 						thumbData = thumbBuf.toString("base64");
 					} catch (err: any) {
