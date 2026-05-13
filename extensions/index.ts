@@ -83,7 +83,7 @@ export default function (pi: ExtensionAPI) {
 			"Generate or edit videos using Alibaba HappyHorse models (I2V, T2V, R2V, Video-Edit). " +
 			"Returns the path to the generated video file.",
 		promptSnippet:
-			"Generate or edit videos using Alibaba HappyHorse via the DASHSCOPE_API_KEY env var.",
+			"Generate or edit videos using Alibaba HappyHorse models (I2V, T2V, R2V).",
 		promptGuidelines: [
 			"Call cavallo_video when the user asks to create or edit a video.",
 			"Use 'happyhorse-t2v' for Text-to-Video.",
@@ -122,9 +122,16 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const apiKey = process.env.DASHSCOPE_API_KEY;
+			let apiKey = process.env.DASHSCOPE_API_KEY;
+			if (!apiKey && ctx.modelRegistry) {
+				try {
+					apiKey = await ctx.modelRegistry.getApiKeyForProvider("alibaba-cloud");
+				} catch (err) {
+					// ignore
+				}
+			}
 			if (!apiKey) {
-				throw new Error("DASHSCOPE_API_KEY is missing. Please set it in your environment.");
+				throw new Error("DASHSCOPE_API_KEY is missing. Please set it in your environment or configure Alibaba Cloud in Pi (/models).");
 			}
 
 			const cwd = ctx.cwd;
