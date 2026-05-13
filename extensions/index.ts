@@ -76,6 +76,67 @@ async function resolveOutputPath(cwd: string, prompt: string | undefined, overri
 }
 
 export default function (pi: ExtensionAPI) {
+	pi.registerMessageRenderer("cavallo_result", (message, _options, theme) => {
+		const { details, content } = message;
+		const container = new Container();
+
+		container.addChild(
+			new Text(theme.fg("success", (content?.[0] as any)?.text || "Success!"), 0, 0)
+		);
+
+		if (!details) return container;
+
+		const {
+			model,
+			prompt,
+			imagePath,
+			videoPath,
+			referenceImages,
+			outputPath,
+			taskId,
+			videoUrl,
+			metrics,
+		} = details as any;
+
+		container.addChild(new Spacer(1));
+
+		const settingsBox = new Box(1, 1, (s) => theme.bg("customMessageBg", s));
+		const settingsContainer = new Container();
+
+		settingsContainer.addChild(
+			new Text(theme.fg("accent", theme.bold("CAVALLO DETAILS")), 0, 0)
+		);
+		settingsContainer.addChild(new Spacer(1));
+
+		const addSetting = (label: string, value: string) => {
+			settingsContainer.addChild(
+				new Text(
+					theme.fg("muted", label.padEnd(10)) + theme.fg("text", String(value)),
+					0,
+					0
+				)
+			);
+		};
+
+		if (model) addSetting("Model", model);
+		if (prompt) addSetting("Prompt", prompt);
+		if (imagePath) addSetting("Image", imagePath);
+		if (videoPath) addSetting("Video", videoPath);
+		if (referenceImages && referenceImages.length > 0) {
+			addSetting("Refs", Array.isArray(referenceImages) ? referenceImages.join(", ") : referenceImages);
+		}
+		if (taskId) addSetting("Task ID", taskId);
+		if (metrics?.duration) addSetting("Duration", `${metrics.duration}s`);
+		if (metrics?.SR) addSetting("Resolution", `${metrics.SR}P`);
+		if (outputPath) addSetting("Saved To", outputPath);
+		if (videoUrl) addSetting("URL", videoUrl);
+
+		settingsBox.addChild(settingsContainer);
+		container.addChild(settingsBox);
+
+		return container;
+	});
+
 	pi.registerTool({
 		name: "cavallo_video",
 		label: "Cavallo Video",
@@ -252,83 +313,87 @@ export default function (pi: ExtensionAPI) {
 				details: { ...params, taskId, status: "Polling", progress: "Waiting for video generation..." },
 			});
 
-			// Polling
-			let videoUrl: string | undefined;
-			let taskMetrics: any = {};
-			
-			while (!signal?.aborted) {
-				await new Promise(r => setTimeout(r, 10000)); // Poll every 10s
+			const startBackgroundTask = async () => {
+				const updateStatus = (text: string | undefined) => {
+					if (ctx.hasUI) ctx.ui.setStatus(`cavallo_${taskId}`, text);
+				};
 				
-				const pollRes = await fetch(`https://dashscope-intl.aliyuncs.com/api/v1/tasks/${taskId}`, {
-					headers: { "Authorization": `Bearer ${apiKey}` },
-					signal
-				});
-				if (!pollRes.ok) {
-					const errText = await pollRes.text();
-					if (ctx.hasUI) ctx.ui.setWorkingIndicator();
-					throw new Error(`DashScope Polling error (${pollRes.status}): ${errText}`);
-				}
-				const pollData: any = await pollRes.json();
-				const status = pollData?.output?.task_status;
-				
-				if (status === "SUCCEEDED") {
-					videoUrl = pollData?.output?.video_url;
-					if (pollData?.usage) {
-						taskMetrics = pollData.usage;
+				try {
+					updateStatus(`Cavallo: Polling...`);
+					let videoUrl: string | undefined;
+					let taskMetrics: any = {};
+					
+					while (true) {
+						await new Promise(r => setTimeout(r, 10000)); // Poll every 10s
+						
+						const pollRes = await fetch(`https://dashscope-intl.aliyuncs.com/api/v1/tasks/${taskId}`, {
+							headers: { "Authorization": `Bearer ${apiKey}` }
+						});
+						if (!pollRes.ok) {
+							const errText = await pollRes.text();
+							throw new Error(`Polling error (${pollRes.status}): ${errText}`);
+						}
+						const pollData: any = await pollRes.json();
+						const status = pollData?.output?.task_status;
+						
+						if (status === "SUCCEEDED") {
+							videoUrl = pollData?.output?.video_url;
+							if (pollData?.usage) taskMetrics = pollData.usage;
+							break;
+						} else if (status === "FAILED") {
+							const code = pollData?.output?.code;
+							const message = pollData?.output?.message;
+							throw new Error(`${code} - ${message}`);
+						}
+						
+						updateStatus(`Cavallo: ${status}...`);
 					}
-					break;
-				} else if (status === "FAILED") {
-					const code = pollData?.output?.code;
-					const message = pollData?.output?.message;
-					if (ctx.hasUI) ctx.ui.setWorkingIndicator(); // restore default
-					throw new Error(`Task failed: ${code} - ${message}`);
+
+					if (!videoUrl) {
+						throw new Error("Task succeeded but no video_url was returned.");
+					}
+
+					updateStatus(`Cavallo: Downloading...`);
+
+					const outPath = await resolveOutputPath(cwd, params.prompt, params.outputPath);
+					const videoRes = await fetch(videoUrl);
+					if (!videoRes.ok) {
+						throw new Error(`Download failed: ${videoRes.statusText}`);
+					}
+					
+					const arrayBuf = await videoRes.arrayBuffer();
+					await writeFile(outPath, Buffer.from(arrayBuf));
+
+					updateStatus(undefined);
+
+					ctx.sendMessage({
+						customType: "cavallo_result",
+						content: [{ type: "text", text: `Video generated successfully: ${outPath}` }],
+						details: {
+							...params,
+							model,
+							taskId,
+							status: "Done",
+							videoUrl,
+							outputPath: outPath,
+							metrics: taskMetrics
+						}
+					});
+				} catch (err: any) {
+					updateStatus(undefined);
+					if (ctx.hasUI) {
+						ctx.ui.notify(`Cavallo Background Task Failed: ${err.message}`, "error");
+					}
 				}
-				
-				onUpdate?.({
-					content: [{ type: "text", text: `Task ${taskId} is ${status}…` }],
-					details: { ...params, taskId, status, progress: "Checking DashScope..." },
-				});
-			}
+			};
 
-			if (signal?.aborted) {
-				if (ctx.hasUI) ctx.ui.setWorkingIndicator(); // restore default
-				return { content: [{ type: "text", text: "Cancelled." }], details: {} };
-			}
-
-			if (!videoUrl) {
-				if (ctx.hasUI) ctx.ui.setWorkingIndicator(); // restore default
-				throw new Error("Task succeeded but no video_url was returned.");
-			}
-
-			onUpdate?.({
-				content: [{ type: "text", text: `Downloading video from ${videoUrl}…` }],
-				details: { ...params, taskId, status: "Downloading", progress: "Downloading..." },
-			});
-
-			const outPath = await resolveOutputPath(cwd, params.prompt, params.outputPath);
-			const videoRes = await fetch(videoUrl, { signal });
-			if (!videoRes.ok) {
-				if (ctx.hasUI) ctx.ui.setWorkingIndicator(); // restore default
-				throw new Error(`Failed to download video: ${videoRes.statusText}`);
-			}
-			
-			const arrayBuf = await videoRes.arrayBuffer();
-			await writeFile(outPath, Buffer.from(arrayBuf));
+			startBackgroundTask().catch(console.error);
 
 			if (ctx.hasUI) ctx.ui.setWorkingIndicator(); // restore default
 
 			return {
-				content: [
-					{ type: "text", text: `Video generated successfully: ${outPath}` },
-				],
-				details: {
-					...params,
-					taskId,
-					status: "Done",
-					videoUrl,
-					outputPath: outPath,
-					metrics: taskMetrics
-				},
+				content: [{ type: "text", text: `Task ${taskId} submitted and running in background.` }],
+				details: { taskId, status: "Background" },
 			};
 		},
 
@@ -336,6 +401,14 @@ export default function (pi: ExtensionAPI) {
 			const { details } = result;
 			const container = new Container();
 
+			if (details?.status === "Background") {
+				container.addChild(
+					new Text(theme.fg("muted", (result.content[0] as any)?.text || "Task running in background..."), 0, 0)
+				);
+				return container;
+			}
+
+			// (Dead code below if we only return "Background" from execute, but preserved if it ever runs synchronously)
 			container.addChild(
 				new Text(theme.fg("success", (result.content[0] as any)?.text || "Success!"), 0, 0)
 			);
