@@ -348,7 +348,7 @@ export default function (pi: ExtensionAPI) {
 					}
 					media.push(mediaItem);
 				}
-			} else if (model.includes("-videoedit")) {
+			} else if (model.includes("-videoedit") || model.includes("-video-edit")) {
 				if (params.videoPath) {
 					media.push({ type: "video", url: await loadReferenceFile(cwd, params.videoPath) });
 				}
@@ -435,10 +435,6 @@ export default function (pi: ExtensionAPI) {
 						if (status && status !== lastReportedStatus) {
 							lastReportedStatus = status;
 							updateStatus(`Cavallo: ${status}...`);
-							onUpdate?.({
-								content: [{ type: "text", text: `Task ${taskId}: ${status}` }],
-								details: { ...params, model, taskId, status, progress: `Generation ${status.toLowerCase()}...` },
-							});
 						}
 					}
 
