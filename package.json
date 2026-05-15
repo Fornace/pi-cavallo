@@ -1,6 +1,6 @@
 {
   "name": "pi-cavallo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Generate and edit video in pi using Alibaba HappyHorse models (I2V, T2V, R2V, Video-Edit).",
   "author": "Francesco Frapporti <effedue@gmail.com>",
   "license": "MIT",
