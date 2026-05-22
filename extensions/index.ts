@@ -246,16 +246,28 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			let apiKey = process.env.DASHSCOPE_API_KEY;
-			if (!apiKey && ctx.modelRegistry) {
+			// Resolve DashScope API key using pi's native credential chain first
+			// (auth.json → env vars → models.json fallback), then fall back to
+			// direct env var for backward compat.
+			let apiKey: string | undefined;
+			if (ctx.modelRegistry) {
 				try {
 					apiKey = await ctx.modelRegistry.getApiKeyForProvider("alibaba-cloud");
-				} catch (err) {
-					// ignore
+				} catch {
+					// ignore — fall through to env var
 				}
 			}
 			if (!apiKey) {
-				throw new Error("DASHSCOPE_API_KEY is missing. Please set it in your environment or configure Alibaba Cloud in Pi (/models).");
+				apiKey = process.env.DASHSCOPE_API_KEY;
+			}
+			if (!apiKey) {
+				throw new Error(
+					"No DashScope API key found. pi-cavallo looked in this order:\n" +
+						"  1. ~/.pi/agent/auth.json → \"alibaba-cloud\" key (set via /login or edit auth.json)\n" +
+						"  2. models.json provider config (pi --list-models to check)\n" +
+						"  3. DASHSCOPE_API_KEY env var\n\n" +
+						"Get a key at https://dashscope.console.aliyun.com/",
+				);
 			}
 
 			const cwd = ctx.cwd;
