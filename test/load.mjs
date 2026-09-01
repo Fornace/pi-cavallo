@@ -7,7 +7,7 @@ const pi = {
 	registerMessageRenderer: (t) => registered.renderers.push(t),
 	sendUserMessage: () => {},
 };
-const { default: ext } = await import("/Users/ffrappo/works/repos/pi-cavallo/extensions/index.ts");
+const { default: ext } = await import("../extensions/index.ts");
 ext(pi);
 assert.equal(registered.tools.length, 1, "one tool registered");
 assert.equal(registered.tools[0].name, "cavallo_video");
@@ -20,7 +20,7 @@ assert.ok(enums.includes("happyhorse-1.1-t2v"), "1.1 in enum");
 assert.ok(enums.includes("wan3.0-video-prime"), "wan3.0 prime in enum");
 assert.ok(!enums.includes("nonexistent"), "no junk ids");
 // pure logic
-const { inferCapability, specFor, DEFAULT_MODELS } = await import("/Users/ffrappo/works/repos/pi-cavallo/extensions/models.ts");
+const { inferCapability, specFor, DEFAULT_MODELS } = await import("../extensions/models.ts");
 assert.equal(inferCapability({ imagePath: "a.png" }), "i2v");
 assert.equal(inferCapability({ videoPath: "a.mp4" }), "edit");
 assert.equal(inferCapability({ referenceImages: ["a"] }), "r2v");
