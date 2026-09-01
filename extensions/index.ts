@@ -8,6 +8,8 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Container, Text, Box, Spacer, Image, Markdown } from "@earendil-works/pi-tui";
 import { MODEL_IDS, inferCapability, specFor, type Capability } from "./models.ts";
 import { resolveDefaultModel, saveDefaultModel } from "./settings.ts";
+import { resolveVideoRoute, openaiGenerateVideo } from "./providers.ts";
+import { runCavalloSetup } from "./wizard.ts";
 import { submitTask, pollUntilDone, downloadVideo, makeThumbnail } from "./task.ts";
 
 const SUPPORTED_INPUT_MIME = new Set(["image/png", "image/jpeg", "image/webp", "video/mp4", "video/webm"]);
@@ -80,6 +82,13 @@ function resolveApiKey(ctx: any): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	pi.registerCommand("cavallo-setup", {
+		description: "Interactive setup: point cavallo at an OpenAI-compatible video provider (URL + key, capability probe)",
+		handler: async (_args, ctx) => {
+			await runCavalloSetup(ctx);
+		},
+	});
+
 	pi.registerMessageRenderer("cavallo_result", (message, _options, theme) => {
 		const { details, content } = message;
 		const container = new Container();
@@ -214,6 +223,51 @@ export default function (pi: ExtensionAPI) {
 			const cwd = ctx.cwd;
 			const capability = inferCapability(params);
 			const model = params.model ?? resolveDefaultModel(capability).model;
+
+			// OpenAI-compatible provider (mantice etc.) when configured via /cavallo-setup.
+			// Currently text-to-video only; reference/image inputs need DashScope.
+			const route = await resolveVideoRoute(ctx);
+			if (route.kind === "openai-compat") {
+				if (capability !== "t2v") {
+					throw new Error(
+						"cavallo: the configured OpenAI-compatible video route supports text-to-video only. " +
+							"Remove \"cavallo\" from settings.json to use DashScope for i2v/r2v/edit.",
+					);
+				}
+				if (ctx.hasUI) {
+					ctx.ui.setWorkingIndicator({ frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], intervalMs: 80 });
+				}
+				onUpdate?.({
+					content: [{ type: "text", text: `Submitting video generation task to ${route.config.model}…` }],
+					details: { ...params, model: route.config.model, status: "Submitting" },
+				});
+				const videoUrl = await openaiGenerateVideo(route.config, {
+					prompt: params.prompt ?? "",
+					duration: params.duration,
+					signal,
+					onStatus: (text) => {
+						if (ctx.hasUI) ctx.ui.setStatus("cavallo_openai", `Cavallo: ${text}`);
+					},
+				});
+				if (ctx.hasUI) ctx.ui.setStatus("cavallo_openai", undefined);
+				const outPath = await resolveOutputPath(cwd, params.prompt, params.outputPath);
+				await downloadVideo(videoUrl, outPath);
+				const thumbData = await makeThumbnail(outPath);
+				pi.sendMessage({
+					customType: "cavallo_result",
+					display: true,
+					content: [{ type: "text", text: `Video generated successfully: ${outPath}` }],
+					details: {
+						...params, model: route.config.model, status: "Done",
+						videoUrl, outputPath: outPath, thumbData,
+					},
+				});
+				return {
+					content: [{ type: "text", text: `Video generated: ${outPath}` }],
+					details: { status: "Done", outputPath: outPath },
+				};
+			}
+
 			const spec = specFor(model);
 			if (!spec) {
 				throw new Error(`Unknown model: ${model}. Run /cavallo-models to list valid ids.`);

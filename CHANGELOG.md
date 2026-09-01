@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0
+
+> OpenAI-compatible video provider support with interactive setup (works with mantice, MiniMax H3 Max via fal).
+
+- New `/cavallo-setup` wizard: enter a base URL and API key, the wizard probes the gateway for video models and the `/videos/generations` endpoint, then saves the route to settings.json.
+- When configured, cavallo_video submits to `{baseUrl}/videos/generations` and polls `{baseUrl}/videos/generations/{id}` (the mantice gateway flow). Delete the "cavallo" section from settings.json to return to DashScope.
+- Verified live through mantice: fornace-video routes to MiniMax H3 Max (fal), submission to finished mp4 URL with native audio.
+- The OpenAI-compatible route is text-to-video only for now; i2v/r2v/edit keep using DashScope.
+
 ## 2.0.0
 
 > New generation catalog and auto-selected defaults, grounded in Alibaba Model Studio docs (2026-09-01).

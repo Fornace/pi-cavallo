@@ -26,6 +26,16 @@ Supports **HappyHorse 1.1/1.0**, **Wan 3.0**, and **Wan2.7**: text-to-video, ima
 - `wan2.7-r2v` (Reference-to-Video)
 - `wan2.7-videoedit` (Video editing via instruction + reference images)
 
+## OpenAI-compatible providers (mantice)
+
+Run `/cavallo-setup` to submit video generation through an OpenAI-compatible gateway instead of DashScope. The wizard probes the endpoint and saves the route under `"cavallo"` in settings.json:
+
+```json
+"cavallo": { "baseUrl": "https://llm.fornace.net/v1", "apiKey": "sk-...", "model": "fornace-video" }
+```
+
+The gateway route is text-to-video; DashScope stays the default for i2v, r2v, and video editing.
+
 ## Defaults and overrides
 
 Omit `model` and the best default is picked automatically from the task type:
