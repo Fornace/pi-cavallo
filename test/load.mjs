@@ -9,11 +9,14 @@ const pi = {
 };
 const { default: ext } = await import("../extensions/index.ts");
 ext(pi);
-assert.equal(registered.tools.length, 1, "one tool registered");
-assert.equal(registered.tools[0].name, "cavallo_video");
+assert.equal(registered.tools.length, 2, "cavallo_video + cavallo_configure registered");
+const names = registered.tools.map((t) => t.name);
+assert.ok(names.includes("cavallo_video") && names.includes("cavallo_configure"), "tool names");
+assert.ok(names.includes("cavallo_video"), "cavallo_video present");
+const video = registered.tools.find((t) => t.name === "cavallo_video");
 assert.ok(registered.commands.some(c => c.name === "cavallo-models"), "command registered");
 assert.ok(registered.renderers.includes("cavallo_result"));
-const schema = registered.tools[0].parameters;
+const schema = video.parameters;
 assert.ok(!schema.properties.model.default ?? true, "model optional");
 const enums = schema.properties.model.enum ?? schema.properties.model.anyOf;
 assert.ok(enums.includes("happyhorse-1.1-t2v"), "1.1 in enum");

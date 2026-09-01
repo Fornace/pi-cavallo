@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.1
+
+- New `cavallo_configure` tool: non-interactive video route setup for AI agents (probe, persist). `/cavallo-setup` stays for humans.
+- Extracted the OpenAI-compatible video flow into providers.ts; index.ts back under 400 lines.
+
 ## 2.1.0
 
 > OpenAI-compatible video provider support with interactive setup (works with mantice, MiniMax H3 Max via fal).

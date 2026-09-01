@@ -8,8 +8,8 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Container, Text, Box, Spacer, Image, Markdown } from "@earendil-works/pi-tui";
 import { MODEL_IDS, inferCapability, specFor, type Capability } from "./models.ts";
 import { resolveDefaultModel, saveDefaultModel } from "./settings.ts";
-import { resolveVideoRoute, openaiGenerateVideo } from "./providers.ts";
-import { runCavalloSetup } from "./wizard.ts";
+import { resolveVideoRoute, openaiVideoFlow } from "./providers.ts";
+import { runCavalloSetup, configureCavalloProvider } from "./wizard.ts";
 import { submitTask, pollUntilDone, downloadVideo, makeThumbnail } from "./task.ts";
 
 const SUPPORTED_INPUT_MIME = new Set(["image/png", "image/jpeg", "image/webp", "video/mp4", "video/webm"]);
@@ -63,8 +63,6 @@ async function resolveOutputPath(cwd: string, prompt: string | undefined, overri
 }
 
 function resolveApiKey(ctx: any): string {
-	// pi's native credential chain first (auth.json → env vars → models.json),
-	// then the direct env var for backward compatibility.
 	if (ctx.modelRegistry) {
 		try {
 			const k = ctx.modelRegistry.getApiKeyForProvider("alibaba-cloud");
@@ -86,6 +84,63 @@ export default function (pi: ExtensionAPI) {
 		description: "Interactive setup: point cavallo at an OpenAI-compatible video provider (URL + key, capability probe)",
 		handler: async (_args, ctx) => {
 			await runCavalloSetup(ctx);
+		},
+	});
+
+	pi.registerTool({
+		name: "cavallo_configure",
+		label: "Cavallo Configure",
+		description:
+			"Configure cavallo to submit video generation through an OpenAI-compatible gateway (mantice) instead of DashScope. " +
+			"Probes the endpoint and saves the route. Call this when the user asks to set up or switch the video provider.",
+		promptSnippet: "Configure the cavallo video provider (mantice) non-interactively.",
+		parameters: Type.Object({
+			baseUrl: Type.String({ description: "OpenAI-compatible base URL, e.g. https://llm.fornace.net/v1" }),
+			apiKey: Type.Optional(Type.String({
+				description: "API key. Omit to reuse the mantice key already stored in pi credentials.",
+			})),
+			model: Type.Optional(Type.String({
+				description: "Video model/group id. Omit to auto-detect (e.g. fornace-video).",
+			})),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const report = await configureCavalloProvider(ctx, params);
+			return { content: [{ type: "text", text: report }], details: {} };
+		},
+	});
+
+	pi.registerCommand("cavallo-models", {
+		description: "List Cavallo video models, capabilities, and current defaults",
+		handler: async (args) => {
+			if (args?.trim()) {
+				const m = args.trim().match(/^(t2v|i2v|r2v|edit)\s*=\s*(\S+)$/);
+				if (!m) {
+					pi.sendUserMessage("Usage: /cavallo-models t2v=happyhorse-1.1-t2v (capabilities: t2v, i2v, r2v, edit)");
+					return;
+				}
+				const [, cap, model] = m;
+				const spec = specFor(model);
+				if (!spec || !spec.capabilities.includes(cap as Capability)) {
+					pi.sendUserMessage(`Model ${model} does not support ${cap}. Run /cavallo-models to see the catalog.`);
+					return;
+				}
+				await saveDefaultModel(cap as Capability, model);
+				pi.sendUserMessage(`Cavallo default for ${cap} is now ${model} (saved in settings.json).`);
+				return;
+			}
+			const lines = ["Cavallo video models (Alibaba Model Studio):", ""];
+			for (const cap of ["t2v", "i2v", "r2v", "edit"] as Capability[]) {
+				const d = resolveDefaultModel(cap);
+				const models = MODEL_IDS.filter((id) => specFor(id)!.capabilities.includes(cap));
+				lines.push(`${cap}  default: ${d.model}${d.source === "settings" ? " (settings override)" : ""}`);
+				for (const id of models) {
+					const spec = specFor(id)!;
+					lines.push(`  ${id}  ${spec.resolutions.join("/")}  ${spec.minDuration}-${spec.maxDuration}s${spec.audio ? "  audio" : ""}`);
+				}
+				lines.push("");
+			}
+			lines.push("Override a default: /cavallo-models t2v=<model-id>  (or edit \"cavallo\" in settings.json)");
+			pi.sendUserMessage(lines.join("\n"));
 		},
 	});
 
@@ -127,42 +182,6 @@ export default function (pi: ExtensionAPI) {
 		box.addChild(inner);
 		container.addChild(box);
 		return container;
-	});
-
-	pi.registerCommand("cavallo-models", {
-		description: "List Cavallo video models, capabilities, and current defaults",
-		handler: async (args) => {
-			if (args?.trim()) {
-				// /cavallo-models <capability>=<model-id> persists a default override.
-				const m = args.trim().match(/^(t2v|i2v|r2v|edit)\s*=\s*(\S+)$/);
-				if (!m) {
-					pi.sendUserMessage("Usage: /cavallo-models t2v=happyhorse-1.1-t2v (capabilities: t2v, i2v, r2v, edit)");
-					return;
-				}
-				const [, cap, model] = m;
-				const spec = specFor(model);
-				if (!spec || !spec.capabilities.includes(cap as Capability)) {
-					pi.sendUserMessage(`Model ${model} does not support ${cap}. Run /cavallo-models to see the catalog.`);
-					return;
-				}
-				await saveDefaultModel(cap as Capability, model);
-				pi.sendUserMessage(`Cavallo default for ${cap} is now ${model} (saved in settings.json).`);
-				return;
-			}
-			const lines = ["Cavallo video models (Alibaba Model Studio):", ""];
-			for (const cap of ["t2v", "i2v", "r2v", "edit"] as Capability[]) {
-				const d = resolveDefaultModel(cap);
-				const models = MODEL_IDS.filter((id) => specFor(id)!.capabilities.includes(cap));
-				lines.push(`${cap}  default: ${d.model}${d.source === "settings" ? " (settings override)" : ""}`);
-				for (const id of models) {
-					const spec = specFor(id)!;
-					lines.push(`  ${id}  ${spec.resolutions.join("/")}  ${spec.minDuration}-${spec.maxDuration}s${spec.audio ? "  audio" : ""}`);
-				}
-				lines.push("");
-			}
-			lines.push("Override a default: /cavallo-models t2v=<model-id>  (or edit \"cavallo\" in settings.json)");
-			pi.sendUserMessage(lines.join("\n"));
-		},
 	});
 
 	pi.registerTool({
@@ -219,55 +238,17 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const apiKey = resolveApiKey(ctx);
-			const cwd = ctx.cwd;
-			const capability = inferCapability(params);
-			const model = params.model ?? resolveDefaultModel(capability).model;
-
 			// OpenAI-compatible provider (mantice etc.) when configured via /cavallo-setup.
 			// Currently text-to-video only; reference/image inputs need DashScope.
 			const route = await resolveVideoRoute(ctx);
 			if (route.kind === "openai-compat") {
-				if (capability !== "t2v") {
-					throw new Error(
-						"cavallo: the configured OpenAI-compatible video route supports text-to-video only. " +
-							"Remove \"cavallo\" from settings.json to use DashScope for i2v/r2v/edit.",
-					);
-				}
-				if (ctx.hasUI) {
-					ctx.ui.setWorkingIndicator({ frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], intervalMs: 80 });
-				}
-				onUpdate?.({
-					content: [{ type: "text", text: `Submitting video generation task to ${route.config.model}…` }],
-					details: { ...params, model: route.config.model, status: "Submitting" },
-				});
-				const videoUrl = await openaiGenerateVideo(route.config, {
-					prompt: params.prompt ?? "",
-					duration: params.duration,
-					signal,
-					onStatus: (text) => {
-						if (ctx.hasUI) ctx.ui.setStatus("cavallo_openai", `Cavallo: ${text}`);
-					},
-				});
-				if (ctx.hasUI) ctx.ui.setStatus("cavallo_openai", undefined);
-				const outPath = await resolveOutputPath(cwd, params.prompt, params.outputPath);
-				await downloadVideo(videoUrl, outPath);
-				const thumbData = await makeThumbnail(outPath);
-				pi.sendMessage({
-					customType: "cavallo_result",
-					display: true,
-					content: [{ type: "text", text: `Video generated successfully: ${outPath}` }],
-					details: {
-						...params, model: route.config.model, status: "Done",
-						videoUrl, outputPath: outPath, thumbData,
-					},
-				});
-				return {
-					content: [{ type: "text", text: `Video generated: ${outPath}` }],
-					details: { status: "Done", outputPath: outPath },
-				};
+				return openaiVideoFlow(pi, ctx, route.config, params, signal, onUpdate);
 			}
 
+			const apiKey = resolveApiKey(ctx);
+			const cwd = ctx.cwd;
+			const capability = inferCapability(params);
+			const model = params.model ?? resolveDefaultModel(capability).model;
 			const spec = specFor(model);
 			if (!spec) {
 				throw new Error(`Unknown model: ${model}. Run /cavallo-models to list valid ids.`);

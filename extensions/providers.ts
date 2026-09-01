@@ -133,3 +133,74 @@ export async function openaiGenerateVideo(
 	}
 	throw new Error("Video task timed out after 8 minutes.");
 }
+
+/** Full OpenAI-compat video flow used by cavallo_video's execute:
+ * submit, poll, download, notify. Text-to-video only. */
+export async function openaiVideoFlow(
+	pi: any,
+	ctx: any,
+	config: OpenAiVideoConfig,
+	params: { prompt?: string; duration?: number; outputPath?: string },
+	signal: AbortSignal | undefined,
+	onUpdate?: any,
+): Promise<{ content: { type: "text"; text: string }[]; details: Record<string, unknown> }> {
+	const { resolve, isAbsolute } = await import("path");
+	const { mkdir, writeFile, readFile } = await import("fs/promises");
+	const { execFile } = await import("child_process");
+	const { promisify } = await import("util");
+	const execFileAsync = promisify(execFile);
+
+	if (ctx.hasUI) {
+		ctx.ui.setWorkingIndicator({
+			frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+			intervalMs: 80,
+		});
+	}
+	onUpdate?.({
+		content: [{ type: "text", text: `Submitting video generation task to ${config.model}…` }],
+		details: { ...params, model: config.model, status: "Submitting" },
+	});
+	const videoUrl = await openaiGenerateVideo(config, {
+		prompt: params.prompt ?? "",
+		duration: params.duration,
+		signal,
+		onStatus: (text) => {
+			if (ctx.hasUI) ctx.ui.setStatus("cavallo_openai", `Cavallo: ${text}`);
+		},
+	});
+	if (ctx.hasUI) ctx.ui.setStatus("cavallo_openai", undefined);
+
+	const cwd = ctx.cwd;
+	let outPath: string;
+	if (params.outputPath) {
+		const cleaned = params.outputPath.replace(/^@/, "");
+		outPath = isAbsolute(cleaned) ? cleaned : resolve(cwd, cleaned);
+		await mkdir(resolve(outPath, ".."), { recursive: true });
+	} else {
+		const dir = resolve(cwd, "generated");
+		await mkdir(dir, { recursive: true });
+		const slug = (params.prompt ?? "video").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "video";
+		outPath = resolve(dir, `${slug}-${new Date().toISOString().replace(/[:.]/g, "-")}.mp4`);
+	}
+	const videoRes = await fetch(videoUrl);
+	if (!videoRes.ok) throw new Error(`Download failed: ${videoRes.statusText}`);
+	await writeFile(outPath, Buffer.from(await videoRes.arrayBuffer()));
+
+	let thumbData: string | undefined;
+	try {
+		const thumbPath = `${outPath}.thumb.jpg`;
+		await execFileAsync("ffmpeg", ["-y", "-i", outPath, "-vframes", "1", "-vf", "scale=160:-1", "-f", "image2", "-vcodec", "mjpeg", "-q:v", "3", thumbPath]);
+		thumbData = (await readFile(thumbPath)).toString("base64");
+	} catch { /* ffmpeg optional */ }
+
+	pi.sendMessage({
+		customType: "cavallo_result",
+		display: true,
+		content: [{ type: "text", text: `Video generated successfully: ${outPath}` }],
+		details: { ...params, model: config.model, status: "Done", videoUrl, outputPath: outPath, thumbData },
+	});
+	return {
+		content: [{ type: "text", text: `Video generated: ${outPath}` }],
+		details: { status: "Done", outputPath: outPath },
+	};
+}

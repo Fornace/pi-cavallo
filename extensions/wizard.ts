@@ -15,6 +15,55 @@ function persistCavalloConfig(cfg: Record<string, unknown>): void {
 	writeFileSync(SETTINGS_PATH, JSON.stringify(raw, null, 2));
 }
 
+export interface ConfigureOptions {
+	baseUrl: string;
+	apiKey?: string;
+	model?: string;
+}
+
+/** Non-interactive video route configuration. Used by cavallo_configure and
+ * the wizard. Returns a human-readable report. */
+export async function configureCavalloProvider(ctx: any, opts: ConfigureOptions): Promise<string> {
+	const baseUrl = opts.baseUrl.replace(/\/+$/, "");
+	let apiKey = opts.apiKey;
+	if (!apiKey && ctx?.modelRegistry) {
+		for (const p of ["mantice", "alibaba-cloud"]) {
+			try {
+				apiKey = await ctx.modelRegistry.getApiKeyForProvider(p);
+				if (apiKey) break;
+			} catch { /* next */ }
+		}
+	}
+	if (!apiKey) apiKey = process.env.MANTICE_API_KEY;
+	if (!apiKey) throw new Error("No API key found: pass apiKey, log in via /login, or set MANTICE_API_KEY.");
+
+	const res = await fetch(`${baseUrl}/models`, { headers: { Authorization: `Bearer ${apiKey}` } });
+	if (!res.ok) throw new Error(`GET ${baseUrl}/models failed (${res.status})`);
+	const data: any = await res.json();
+	const ids: string[] = (data?.data ?? []).map((m: any) => m.id).filter(Boolean);
+	const { videoModels } = classifyModels(ids);
+
+	let videoEndpoint = false;
+	try {
+		const probe = await fetch(`${baseUrl}/videos/generations`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+			body: JSON.stringify({ model: "__cavallo_probe__", prompt: "probe" }),
+		});
+		videoEndpoint = probe.status !== 404;
+	} catch { videoEndpoint = false; }
+	if (!videoEndpoint) throw new Error("Endpoint has no /videos/generations support. Nothing was saved.");
+
+	const model = opts.model ?? videoModels[0] ?? "fornace-video";
+	persistCavalloConfig({ baseUrl, apiKey, model });
+	return [
+		`Configured cavallo on ${baseUrl}:`,
+		`  video model/group = ${model}`,
+		videoModels.length ? `  other video models: ${videoModels.join(", ")}` : "",
+		"cavallo_video text-to-video now uses this provider (i2v/r2v/edit stay on DashScope).",
+	].filter(Boolean).join("\n");
+}
+
 export async function runCavalloSetup(ctx: any): Promise<void> {
 	const ui = ctx.ui;
 	ui.notify("Cavallo setup: configure an OpenAI-compatible video provider (mantice works).", "info");
