@@ -17,6 +17,7 @@ export interface OpenAiVideoConfig {
 	baseUrl: string;
 	apiKey: string;
 	model: string;
+	enableSafetyChecker: true;
 }
 
 export type VideoRoute =
@@ -56,16 +57,25 @@ export async function resolveVideoRoute(ctx: any): Promise<VideoRoute> {
 			baseUrl: s.baseUrl.replace(/\/+$/, ""),
 			apiKey,
 			model: s.model ?? "fornace-video",
+			enableSafetyChecker: true,
 		},
 	};
 }
 
 export async function videoSubmit(
 	config: OpenAiVideoConfig,
-	opts: { prompt: string; duration?: number; signal?: AbortSignal },
+	opts: { prompt: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; signal?: AbortSignal },
 ): Promise<{ id: string; raw: any }> {
-	const body: Record<string, unknown> = { model: config.model, prompt: opts.prompt };
-	if (opts.duration !== undefined) body.duration = opts.duration;
+	const body: Record<string, unknown> = {
+		model: config.model,
+		prompt: opts.prompt,
+		duration: opts.duration ?? 5,
+		resolution: opts.resolution ?? "768P",
+		aspect_ratio: opts.aspectRatio ?? "16:9",
+		prompt_expansion_mode: opts.promptExpansionMode ?? "balanced",
+		enable_safety_checker: true,
+	};
+	if (opts.seed !== undefined) body.seed = opts.seed;
 	const res = await fetch(`${config.baseUrl}/videos/generations`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
@@ -115,7 +125,7 @@ export async function videoPoll(
 /** Submit + poll until terminal. Resolves with the finished video URL. */
 export async function openaiGenerateVideo(
 	config: OpenAiVideoConfig,
-	opts: { prompt: string; duration?: number; signal?: AbortSignal; onStatus?: (text: string) => void },
+	opts: { prompt: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; signal?: AbortSignal; onStatus?: (text: string) => void },
 ): Promise<string> {
 	const submit = await videoSubmit(config, opts);
 	opts.onStatus?.(`Task ${submit.id} submitted, polling…`);
@@ -140,7 +150,7 @@ export async function openaiVideoFlow(
 	pi: any,
 	ctx: any,
 	config: OpenAiVideoConfig,
-	params: { prompt?: string; duration?: number; outputPath?: string },
+	params: { prompt?: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; outputPath?: string },
 	signal: AbortSignal | undefined,
 	onUpdate?: any,
 ): Promise<{ content: { type: "text"; text: string }[]; details: Record<string, unknown> }> {
@@ -163,6 +173,10 @@ export async function openaiVideoFlow(
 	const videoUrl = await openaiGenerateVideo(config, {
 		prompt: params.prompt ?? "",
 		duration: params.duration,
+		resolution: params.resolution,
+		aspectRatio: params.aspectRatio,
+		promptExpansionMode: params.promptExpansionMode,
+		seed: params.seed,
 		signal,
 		onStatus: (text) => {
 			if (ctx.hasUI) ctx.ui.setStatus("cavallo_openai", `Cavallo: ${text}`);

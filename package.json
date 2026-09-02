@@ -1,6 +1,6 @@
 {
   "name": "pi-cavallo",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "Generate and edit video in pi using Alibaba video models: HappyHorse 1.1/1.0, Wan 3.0, Wan 2.7 (T2V, I2V, R2V, Video-Edit). Auto-selected defaults, per-task-type overrides.",
   "author": "Francesco Frapporti <effedue@gmail.com>",
   "license": "MIT",

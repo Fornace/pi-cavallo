@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.2.0
+
+> Premium fal H3 Max routing with safe, documented generation controls.
+
+- Mantice `fornace-video` now prioritizes fal MiniMax H3 Max, the exact endpoint `minimax/h3-max/text-to-video`.
+- OpenAI-compatible video requests now default to 768P, 16:9, 5 seconds, and balanced prompt expansion.
+- Exposed documented options: `resolution`, `aspectRatio`, `promptExpansionMode`, and `seed`.
+- `enable_safety_checker` is forced to `true` in the client and is never user-configurable. Platform and provider safety controls remain active.
+- Added outbound request regression coverage for safety and defaults.
+
 ## 2.1.1
 
 - New `cavallo_configure` tool: non-interactive video route setup for AI agents (probe, persist). `/cavallo-setup` stays for humans.

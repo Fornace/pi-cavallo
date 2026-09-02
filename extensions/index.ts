@@ -198,7 +198,7 @@ export default function (pi: ExtensionAPI) {
 			"Pass `imagePath` for Image-to-Video, `videoPath` for Video-Edit, `referenceImages` (up to 9) for Reference-to-Video.",
 			"Use 'wan3.0-video' or 'wan3.0-video-prime' for clips longer than 15s (up to 30s), first/last-frame stitching, or file/web-link references.",
 			"Use 'wan2.7-i2v-2026-04-25' with `lastImagePath`/`firstClipPath` for end-frame or continuation control.",
-			"`audioPath` must be a public HTTP/HTTPS URL (local audio files are not supported by the API).",
+			"For Mantice H3 Max, prefer 768P, 16:9, 5 seconds, and balanced prompt expansion. The fal safety checker is always enabled by policy and cannot be disabled.",
 		],
 		parameters: Type.Object({
 			model: Type.Optional(StringEnum(MODEL_IDS, {
@@ -212,18 +212,21 @@ export default function (pi: ExtensionAPI) {
 			firstClipPath: Type.Optional(Type.String({ description: "Path to input video clip for video continuation using I2V model." })),
 			audioPath: Type.Optional(Type.String({ description: "Public HTTP/HTTPS URL to an audio file for audio-driven video. Local file paths are not supported by the API." })),
 			referenceImages: Type.Optional(Type.Array(Type.String(), { description: "Paths to reference images for R2V or Video-Edit models." })),
-			aspectRatio: Type.Optional(StringEnum(["16:9", "9:16", "1:1", "4:3", "3:4", "4:5", "5:4"], {
-				description: "Aspect ratio of the generated video (only applies to t2v and r2v models).",
+			aspectRatio: Type.Optional(StringEnum(["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"], {
+				description: "Output aspect ratio. H3 Max default is 16:9.",
 			})),
-			resolution: Type.Optional(StringEnum(["480P", "720P", "1080P"], {
-				description: "Resolution of the generated video. Default is 720P for faster/cheaper generation; must be supported by the chosen model.",
+			resolution: Type.Optional(StringEnum(["480P", "768P", "720P", "1080P"], {
+				description: "Output resolution. H3 Max accepts 480P or 768P; other configured video providers may support 720P/1080P.",
+			})),
+			promptExpansionMode: Type.Optional(StringEnum(["balanced", "quality"], {
+				description: "Prompt rewriting effort. balanced is faster; quality spends longer on a richer prompt.",
 			})),
 			duration: Type.Optional(Type.Integer({
-				description: "Duration of the generated video in seconds. Limits depend on the model (2-30).",
+				description: "Duration in seconds. H3 Max defaults to 5; supported range depends on the provider.",
 				minimum: 2,
 				maximum: 30,
 			})),
-			seed: Type.Optional(Type.Integer({ description: "Random seed for reproducibility [0, 2147483647].", minimum: 0, maximum: 2147483647 })),
+			seed: Type.Optional(Type.Integer({ description: "Random seed for reproducibility.", minimum: 0, maximum: 2147483647 })),
 			promptExtend: Type.Optional(Type.Boolean({ description: "Enable intelligent prompt rewriting (adds latency, default true)." })),
 			watermark: Type.Optional(Type.Boolean({ description: "Add AI Generated watermark to the video (default true)." })),
 			outputPath: Type.Optional(Type.String({ description: "Optional output path for the generated video. Defaults to ./generated/<slug>-<timestamp>.mp4" })),
@@ -242,7 +245,10 @@ export default function (pi: ExtensionAPI) {
 			// Currently text-to-video only; reference/image inputs need DashScope.
 			const route = await resolveVideoRoute(ctx);
 			if (route.kind === "openai-compat") {
-				return openaiVideoFlow(pi, ctx, route.config, params, signal, onUpdate);
+				return openaiVideoFlow(pi, ctx, route.config, {
+					...params,
+					promptExpansionMode: params.promptExpansionMode as "balanced" | "quality" | undefined,
+				}, signal, onUpdate);
 			}
 
 			const apiKey = resolveApiKey(ctx);
