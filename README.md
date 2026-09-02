@@ -57,7 +57,7 @@ Omit `model` and the best default is picked automatically from the task type:
 - **Smart Thumbnails**: Automatically extracts and displays a thumbnail when the video finishes downloading using `ffmpeg` (if installed).
 - **Finder Integration**: Clickable markdown links to quickly reveal the exported video in Finder without launching it (`open -R`).
 - **Headless Mode Support**: Fully compatible with API usage or RPC mode.
-- **Granular Control**: Supports settings like `resolution` (defaulting to 720P for speed/cost), `duration`, `aspectRatio`, `watermark`, `seed`, and `promptExtend`.
+- **Granular Control**: Supports `resolution` (H3 Max defaults to 768P), `duration` (5 seconds by default), `aspectRatio` (16:9 by default), `promptExpansionMode` (`balanced` by default), and `seed`. The fal safety checker is always enabled.
 - **Audio Support**: Wan2.7 models accept an `audioPath` parameter for driving video with sound (Note: Audio requires a public HTTP/HTTPS URL per DashScope API).
 
 ## Setup
