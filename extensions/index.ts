@@ -10,7 +10,7 @@ import { resolveDefaultModel, saveDefaultModel } from "./settings.ts";
 import { resolveVideoRoute, openaiVideoFlow } from "./providers.ts";
 import { runCavalloSetup, configureCavalloProvider } from "./wizard.ts";
 import { submitTask, pollUntilDone, downloadVideo } from "./task.ts";
-import { completedVideo, failedVideo } from "./completion.ts";
+import { completedVideo, failedVideo, requireMediaBridge } from "./completion.ts";
 import { registerCavalloRenderer } from "./render.ts";
 
 const SUPPORTED_INPUT_MIME = new Set(["image/png", "image/jpeg", "image/webp", "video/mp4", "video/webm"]);
@@ -214,7 +214,7 @@ export default function (pi: ExtensionAPI) {
 				}, signal, onUpdate);
 			}
 
-			if (ctx.media?.capabilities !== "pi.media.v1") throw new Error("Cavallo generation requires pi.media.v1 completion capture. Nothing submitted.");
+			await requireMediaBridge(pi, ctx, signal);
    const apiKey = resolveApiKey(ctx);
 			const cwd = ctx.cwd;
 			const capability = inferCapability(params);

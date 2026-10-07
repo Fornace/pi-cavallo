@@ -15,7 +15,7 @@ import { resolve } from "path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { downloadVideo } from "./task.ts";
-import { completedVideo, failedVideo } from "./completion.ts";
+import { completedVideo, failedVideo, requireMediaBridge } from "./completion.ts";
 
 export interface DeclaredVideoInputs {
  model?: string; imagePath?: string; lastImagePath?: string; videoPath?: string;
@@ -178,7 +178,7 @@ export async function openaiVideoFlow(
 	onUpdate?: any,
 ): Promise<{ content: { type: "text"; text: string }[]; details: Record<string, unknown> }> {
  assertGatewayInputs(config, params);
- if (ctx.media?.capabilities !== "pi.media.v1") throw new Error("Cavallo generation requires pi.media.v1 completion capture. Nothing submitted.");
+ await requireMediaBridge(pi, ctx, signal);
  const { mkdir } = await import("fs/promises");
  let taskId: string | undefined;
  let outPath: string | undefined;
