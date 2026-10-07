@@ -12,6 +12,25 @@
 import { readFileSync } from "fs";
 import { homedir } from "os";
 import { resolve } from "path";
+import { setTimeout as delay } from "node:timers/promises";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { downloadVideo } from "./task.ts";
+import { completedVideo, failedVideo } from "./completion.ts";
+
+export interface DeclaredVideoInputs {
+ model?: string; imagePath?: string; lastImagePath?: string; videoPath?: string;
+ firstClipPath?: string; audioPath?: string; referenceImages?: string[];
+ negativePrompt?: string; promptExtend?: boolean; watermark?: boolean;
+}
+
+/** Until a first-party gateway input schema is verified, no declared unsupported input can disappear. */
+export function assertGatewayInputs(config: OpenAiVideoConfig, inputs: DeclaredVideoInputs): void {
+ const unsupported = ["imagePath", "lastImagePath", "videoPath", "firstClipPath", "audioPath", "referenceImages", "negativePrompt", "promptExtend", "watermark"] as const;
+ const declared: string[] = unsupported.filter(key => inputs[key] !== undefined);
+ if (inputs.model !== undefined && inputs.model !== config.model) declared.push("model");
+ if (declared.length) throw new Error(`Selected Cavallo gateway ${config.baseUrl} (${config.model}) does not have a verified schema for: ${declared.join(", ")}. Nothing submitted; route unchanged.`);
+}
+
 
 export interface OpenAiVideoConfig {
 	baseUrl: string;
@@ -30,8 +49,9 @@ export function loadCavalloVideoSettings(): Partial<OpenAiVideoConfig> {
 			readFileSync(resolve(homedir(), ".pi", "agent", "settings.json"), "utf8"),
 		);
 		return raw?.cavallo ?? {};
-	} catch {
-		return {};
+	} catch (error) {
+  if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+  throw new Error("Cavallo settings could not be read", { cause: error });
 	}
 }
 
@@ -64,9 +84,10 @@ export async function resolveVideoRoute(ctx: any): Promise<VideoRoute> {
 
 export async function videoSubmit(
 	config: OpenAiVideoConfig,
-	opts: { prompt: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; signal?: AbortSignal },
+	opts: DeclaredVideoInputs & { prompt: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; signal?: AbortSignal },
 ): Promise<{ id: string; raw: any }> {
-	const body: Record<string, unknown> = {
+	assertGatewayInputs(config, opts);
+ const body: Record<string, unknown> = {
 		model: config.model,
 		prompt: opts.prompt,
 		duration: opts.duration ?? 5,
@@ -125,15 +146,17 @@ export async function videoPoll(
 /** Submit + poll until terminal. Resolves with the finished video URL. */
 export async function openaiGenerateVideo(
 	config: OpenAiVideoConfig,
-	opts: { prompt: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; signal?: AbortSignal; onStatus?: (text: string) => void },
+	opts: DeclaredVideoInputs & { prompt: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; signal?: AbortSignal; onStatus?: (text: string) => void; onSubmitted?: (id: string) => void },
 ): Promise<string> {
-	const submit = await videoSubmit(config, opts);
+ const bounded = opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(8 * 60_000)]) : AbortSignal.timeout(8 * 60_000);
+ const submit = await videoSubmit(config, { ...opts, signal: bounded });
+ opts.onSubmitted?.(submit.id);
 	opts.onStatus?.(`Task ${submit.id} submitted, polling…`);
 	const deadline = Date.now() + 8 * 60_000;
 	while (Date.now() < deadline) {
 		if (opts.signal?.aborted) throw new Error("Cancelled.");
-		await new Promise((r) => setTimeout(r, 5_000));
-		const poll = await videoPoll(config, submit.id, opts.signal);
+		await delay(5_000, undefined, { signal: bounded });
+		const poll = await videoPoll(config, submit.id, bounded);
 		if (poll.status === "succeeded") {
 			if (!poll.videoUrl) throw new Error("Video task succeeded without a video url.");
 			return poll.videoUrl;
@@ -147,18 +170,19 @@ export async function openaiGenerateVideo(
 /** Full OpenAI-compat video flow used by cavallo_video's execute:
  * submit, poll, download, notify. Text-to-video only. */
 export async function openaiVideoFlow(
-	pi: any,
-	ctx: any,
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
 	config: OpenAiVideoConfig,
-	params: { prompt?: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; outputPath?: string },
+	params: DeclaredVideoInputs & { prompt?: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; outputPath?: string },
 	signal: AbortSignal | undefined,
 	onUpdate?: any,
 ): Promise<{ content: { type: "text"; text: string }[]; details: Record<string, unknown> }> {
-	const { resolve, isAbsolute } = await import("path");
-	const { mkdir, writeFile, readFile } = await import("fs/promises");
-	const { execFile } = await import("child_process");
-	const { promisify } = await import("util");
-	const execFileAsync = promisify(execFile);
+ assertGatewayInputs(config, params);
+ if (ctx.media?.capabilities !== "pi.media.v1") throw new Error("Cavallo generation requires pi.media.v1 completion capture. Nothing submitted.");
+ const { mkdir } = await import("fs/promises");
+ let taskId: string | undefined;
+ let outPath: string | undefined;
+ try {
 
 	if (ctx.hasUI) {
 		ctx.ui.setWorkingIndicator({
@@ -171,7 +195,9 @@ export async function openaiVideoFlow(
 		details: { ...params, model: config.model, status: "Submitting" },
 	});
 	const videoUrl = await openaiGenerateVideo(config, {
-		prompt: params.prompt ?? "",
+		...params,
+  prompt: params.prompt ?? "",
+  onSubmitted: (id) => { taskId = id; pi.appendEntry("cavallo_job", { taskId: id, model: config.model, status: "Submitted" }); },
 		duration: params.duration,
 		resolution: params.resolution,
 		aspectRatio: params.aspectRatio,
@@ -184,8 +210,8 @@ export async function openaiVideoFlow(
 	});
 	if (ctx.hasUI) ctx.ui.setStatus("cavallo_openai", undefined);
 
-	const cwd = ctx.cwd;
-	let outPath: string;
+	const { isAbsolute } = await import("node:path");
+ const cwd = ctx.cwd;
 	if (params.outputPath) {
 		const cleaned = params.outputPath.replace(/^@/, "");
 		outPath = isAbsolute(cleaned) ? cleaned : resolve(cwd, cleaned);
@@ -196,25 +222,16 @@ export async function openaiVideoFlow(
 		const slug = (params.prompt ?? "video").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "video";
 		outPath = resolve(dir, `${slug}-${new Date().toISOString().replace(/[:.]/g, "-")}.mp4`);
 	}
-	const videoRes = await fetch(videoUrl);
-	if (!videoRes.ok) throw new Error(`Download failed: ${videoRes.statusText}`);
-	await writeFile(outPath, Buffer.from(await videoRes.arrayBuffer()));
-
-	let thumbData: string | undefined;
-	try {
-		const thumbPath = `${outPath}.thumb.jpg`;
-		await execFileAsync("ffmpeg", ["-y", "-i", outPath, "-vframes", "1", "-vf", "scale=160:-1", "-f", "image2", "-vcodec", "mjpeg", "-q:v", "3", thumbPath]);
-		thumbData = (await readFile(thumbPath)).toString("base64");
-	} catch { /* ffmpeg optional */ }
-
-	pi.sendMessage({
-		customType: "cavallo_result",
-		display: true,
-		content: [{ type: "text", text: `Video generated successfully: ${outPath}` }],
-		details: { ...params, model: config.model, status: "Done", videoUrl, outputPath: outPath, thumbData },
-	});
-	return {
-		content: [{ type: "text", text: `Video generated: ${outPath}` }],
-		details: { status: "Done", outputPath: outPath },
-	};
+ await downloadVideo(videoUrl, outPath, signal);
+ await completedVideo(pi, ctx, outPath, { ...params, model: config.model, taskId, videoUrl }, signal);
+ return {
+  content: [{ type: "text", text: `Video saved: ${outPath}` }],
+  details: { status: "Done", taskId, outputPath: outPath },
+ };
+ } catch (error) {
+  failedVideo(pi, { model: config.model, taskId, outputPath: outPath, submitted: !!taskId }, error);
+  throw error;
+ } finally {
+  if (ctx.hasUI) { ctx.ui.setStatus("cavallo_openai", undefined); ctx.ui.setWorkingIndicator(); }
+ }
 }

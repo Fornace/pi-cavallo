@@ -2,15 +2,16 @@ import { resolve, isAbsolute, extname } from "path";
 import { existsSync } from "fs";
 import { readFile, mkdir } from "fs/promises";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { Container, Text, Box, Spacer, Image, Markdown } from "@earendil-works/pi-tui";
+import { Container, Text } from "@earendil-works/pi-tui";
 import { MODEL_IDS, inferCapability, specFor, type Capability } from "./models.ts";
 import { resolveDefaultModel, saveDefaultModel } from "./settings.ts";
 import { resolveVideoRoute, openaiVideoFlow } from "./providers.ts";
 import { runCavalloSetup, configureCavalloProvider } from "./wizard.ts";
-import { submitTask, pollUntilDone, downloadVideo, makeThumbnail } from "./task.ts";
+import { submitTask, pollUntilDone, downloadVideo } from "./task.ts";
+import { completedVideo, failedVideo } from "./completion.ts";
+import { registerCavalloRenderer } from "./render.ts";
 
 const SUPPORTED_INPUT_MIME = new Set(["image/png", "image/jpeg", "image/webp", "video/mp4", "video/webm"]);
 const DEFAULT_OUTPUT_DIR = "./generated";
@@ -144,45 +145,7 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerMessageRenderer("cavallo_result", (message, _options, theme) => {
-		const { details, content } = message;
-		const container = new Container();
-		container.addChild(new Text(theme.fg("success", (content?.[0] as any)?.text || "Success!"), 0, 0));
-		if (!details) return container;
-		const { model, prompt, imagePath, videoPath, referenceImages, outputPath, taskId, videoUrl, metrics, thumbData } = details as any;
-
-		if (thumbData) {
-			container.addChild(new Image(thumbData, "image/jpeg", { ...theme, fallbackColor: (s: string) => theme.fg("muted", s) }, { maxWidthCells: 20, maxHeightCells: 14 }));
-			container.addChild(new Spacer(1));
-		}
-		if (outputPath) {
-			const mdTheme = getMarkdownTheme();
-			const encodedCmd = encodeURIComponent(`open -R "${outputPath}"`);
-			container.addChild(new Markdown(`[Reveal in Finder](command:bash?command=${encodedCmd})\n\`${outputPath}\``, 0, 0, mdTheme));
-		}
-		container.addChild(new Spacer(1));
-
-		const box = new Box(1, 1, (s: string) => theme.bg("customMessageBg", s));
-		const inner = new Container();
-		inner.addChild(new Text(theme.fg("accent", theme.bold("CAVALLO DETAILS")), 0, 0));
-		inner.addChild(new Spacer(1));
-		const add = (label: string, value: string) => {
-			inner.addChild(new Text(theme.fg("muted", label.padEnd(10)) + theme.fg("text", String(value)), 0, 0));
-		};
-		if (model) add("Model", model);
-		if (prompt) add("Prompt", prompt);
-		if (imagePath) add("Image", imagePath);
-		if (videoPath) add("Video", videoPath);
-		if (referenceImages?.length) add("Refs", Array.isArray(referenceImages) ? referenceImages.join(", ") : referenceImages);
-		if (taskId) add("Task ID", taskId);
-		if (metrics?.duration) add("Duration", `${metrics.duration}s`);
-		if (metrics?.SR) add("Resolution", `${metrics.SR}P`);
-		if (outputPath) add("Saved To", outputPath);
-		if (videoUrl) add("URL", videoUrl);
-		box.addChild(inner);
-		container.addChild(box);
-		return container;
-	});
+	registerCavalloRenderer(pi);
 
 	pi.registerTool({
 		name: "cavallo_video",
@@ -251,7 +214,8 @@ export default function (pi: ExtensionAPI) {
 				}, signal, onUpdate);
 			}
 
-			const apiKey = resolveApiKey(ctx);
+			if (ctx.media?.capabilities !== "pi.media.v1") throw new Error("Cavallo generation requires pi.media.v1 completion capture. Nothing submitted.");
+   const apiKey = resolveApiKey(ctx);
 			const cwd = ctx.cwd;
 			const capability = inferCapability(params);
 			const model = params.model ?? resolveDefaultModel(capability).model;
@@ -340,28 +304,22 @@ export default function (pi: ExtensionAPI) {
 				details: { ...params, model, taskId, status: "Polling", progress: "Waiting for video generation..." },
 			});
 
+   pi.appendEntry("cavallo_job", { taskId, model, status: "Submitted" });
 			const runBackground = async () => {
+    let outPath: string | undefined;
 				const setStatus = (text: string | undefined) => {
 					if (ctx.hasUI) ctx.ui.setStatus(`cavallo_${taskId}`, text);
 				};
 				try {
 					setStatus("Cavallo: Polling...");
-					const { videoUrl, usage } = await pollUntilDone(model, apiKey, taskId, (s) => setStatus(`Cavallo: ${s}...`));
+					const { videoUrl, usage } = await pollUntilDone(model, apiKey, taskId, (s) => setStatus(`Cavallo: ${s}...`), signal);
 					setStatus("Cavallo: Downloading...");
-					const outPath = await resolveOutputPath(cwd, params.prompt, params.outputPath);
-					await downloadVideo(videoUrl, outPath);
-					const thumbData = await makeThumbnail(outPath);
-					setStatus(undefined);
-					pi.sendMessage({
-						customType: "cavallo_result",
-						display: true,
-						content: [{ type: "text", text: `Video generated successfully: ${outPath}` }],
-						details: { ...params, model, taskId, status: "Done", videoUrl, outputPath: outPath, metrics: usage, thumbData },
-					});
-				} catch (err: any) {
-					setStatus(undefined);
-					if (ctx.hasUI) ctx.ui.notify(`Cavallo Background Task Failed: ${err.message}`, "error");
-				}
+					outPath = await resolveOutputPath(cwd, params.prompt, params.outputPath);
+					await downloadVideo(videoUrl, outPath, signal);
+     await completedVideo(pi, ctx, outPath, { ...params, model, taskId, videoUrl, metrics: usage }, signal);
+				} catch (err: unknown) {
+     failedVideo(pi, { taskId, model, outputPath: outPath }, err);
+				} finally { setStatus(undefined); }
 			};
 			runBackground().catch(console.error);
 			if (ctx.hasUI) ctx.ui.setWorkingIndicator();
