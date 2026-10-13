@@ -4,7 +4,7 @@ import { readFile, mkdir } from "fs/promises";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { Container, Text } from "@earendil-works/pi-tui";
+import { registerMessageUI, renderMessage } from "./message-ui.ts";
 import { MODEL_IDS, inferCapability, specFor, type Capability } from "./models.ts";
 import { resolveDefaultModel, saveDefaultModel } from "./settings.ts";
 import { resolveVideoRoute, openaiVideoFlow } from "./providers.ts";
@@ -81,10 +81,11 @@ function resolveApiKey(ctx: any): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	registerMessageUI(pi);
 	pi.registerCommand("cavallo-setup", {
 		description: "Interactive setup: point cavallo at an OpenAI-compatible video provider (URL + key, capability probe)",
 		handler: async (_args, ctx) => {
-			await runCavalloSetup(ctx);
+			await runCavalloSetup(pi, ctx);
 		},
 	});
 
@@ -332,13 +333,8 @@ export default function (pi: ExtensionAPI) {
 
 		renderResult(result, _options, theme) {
 			const details = result.details as any;
-			const container = new Container();
-			if (details?.status === "Background") {
-				container.addChild(new Text(theme.fg("muted", (result.content[0] as any)?.text || "Task running in background..."), 0, 0));
-				return container;
-			}
-			container.addChild(new Text(theme.fg("success", (result.content[0] as any)?.text || "Success!"), 0, 0));
-			return container;
+			const text = (result.content[0] as any)?.text || (details?.status === "Background" ? "Task running in background..." : "Success!");
+			return renderMessage(pi, text, theme, { level: details?.status === "Failed" ? "error" : "info" });
 		},
 	});
 }

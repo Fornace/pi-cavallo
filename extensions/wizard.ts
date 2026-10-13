@@ -5,6 +5,8 @@ import { writeFileSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { resolve } from "path";
 import { classifyModels } from "./probe.ts";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { notify } from "./message-ui.ts";
 
 const SETTINGS_PATH = resolve(homedir(), ".pi", "agent", "settings.json");
 
@@ -64,9 +66,9 @@ export async function configureCavalloProvider(ctx: any, opts: ConfigureOptions)
 	].filter(Boolean).join("\n");
 }
 
-export async function runCavalloSetup(ctx: any): Promise<void> {
+export async function runCavalloSetup(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
 	const ui = ctx.ui;
-	ui.notify("Cavallo setup: configure an OpenAI-compatible video provider (mantice works).", "info");
+	notify(pi, ctx, "Cavallo setup: configure an OpenAI-compatible video provider (mantice works).", "info");
 
 	let preKey: string | undefined;
 	for (const p of ["mantice", "alibaba-cloud"]) {
@@ -80,7 +82,7 @@ export async function runCavalloSetup(ctx: any): Promise<void> {
 	const apiKey = (await ui.input("API key", preKey ?? "sk-..."))?.trim();
 	if (!apiKey) return;
 
-	ui.notify("Probing capabilities…", "info");
+	notify(pi, ctx, "Probing capabilities…", "info");
 	let models: string[] = [];
 	try {
 		const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
@@ -90,7 +92,7 @@ export async function runCavalloSetup(ctx: any): Promise<void> {
 		const data: any = await res.json();
 		models = (data?.data ?? []).map((m: any) => m.id).filter(Boolean);
 	} catch (err: any) {
-		ui.notify(`Probe failed: ${err.message}`, "error");
+		notify(pi, ctx, `Probe failed: ${err.message}`, "error");
 		return;
 	}
 	const { videoModels } = classifyModels(models);
@@ -106,7 +108,7 @@ export async function runCavalloSetup(ctx: any): Promise<void> {
 		videoEndpoint = res.status !== 404;
 	} catch { videoEndpoint = false; }
 
-	ui.notify(
+	notify(pi, ctx,
 		[
 			`Models: ${models.length} total`,
 			`Video models: ${videoModels.join(", ") || "none detected"}`,
@@ -116,7 +118,7 @@ export async function runCavalloSetup(ctx: any): Promise<void> {
 	);
 
 	if (!videoEndpoint) {
-		ui.notify("This gateway has no /videos/generations endpoint. Setup aborted; DashScope stays the default.", "error");
+		notify(pi, ctx, "This gateway has no /videos/generations endpoint. Setup aborted; DashScope stays the default.", "error");
 		return;
 	}
 
@@ -125,7 +127,7 @@ export async function runCavalloSetup(ctx: any): Promise<void> {
 		?? suggested;
 
 	persistCavalloConfig({ baseUrl, apiKey, model });
-	ui.notify(
+	notify(pi, ctx,
 		`Saved. cavallo_video now submits to ${baseUrl} with model "${model}". ` +
 			"Run /cavallo-setup again to change, or delete \"cavallo\" from settings.json to return to DashScope.",
 		"info",

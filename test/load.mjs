@@ -5,6 +5,7 @@ const pi = {
 	registerTool: (t) => registered.tools.push(t),
 	registerCommand: (n, c) => registered.commands.push({ name: n, ...c }),
 	registerMessageRenderer: (t) => registered.renderers.push(t),
+	registerEntryRenderer: () => {},
 	sendUserMessage: () => {},
 };
 const { default: ext } = await import("../extensions/index.ts");
