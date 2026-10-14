@@ -3,6 +3,10 @@
 Generate and edit video in pi using Alibaba Model Studio video models.
 Supports **HappyHorse 1.1/1.0**, **Wan 3.0**, and **Wan2.7**: text-to-video, image-to-video, reference-to-video, and video editing.
 
+## Notification contract
+
+This source requires native Pi `NotificationMessageComponent` and `NOTIFICATION_ENTRY`. Generic notices are host-rendered UI-only data; no pi-fornace renderer bridge is required. Result messages keep their own data types. An older host fails explicitly and must be upgraded before this source is activated.
+
 ## Models
 
 ### Wan 3.0 (all-in-one, up to 30 seconds)
