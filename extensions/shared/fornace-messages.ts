@@ -50,27 +50,29 @@ export function renderMessage(text: string, theme: Theme, options: MessageOption
 
 /** Each package owns new entry IDs. Legacy records render without any sibling listener. */
 export function registerNotificationUI(pi: ExtensionAPI, entryType: string): void {
-  for (const type of new Set([entryType, "pi-fornace:notification"])) {
+  const types = new Set([entryType, "pi-fornace:notification"]);
+  for (const type of types) {
     pi.registerEntryRenderer<NotificationData>(type, (entry, options, theme) => {
       const data = notification(entry.data);
       return renderMessage(data.text, theme, { level: data.level, expanded: options.expanded });
     });
-    const restore = (_event: unknown, ctx: ExtensionContext) => {
-      if (ctx.mode !== "tui") return;
-      const visible = new Set(ctx.sessionManager.buildContextEntries().flatMap(entry =>
-        entry.type === "custom" && entry.customType === type
-          ? [(entry.data as NotificationData | undefined)?.sourceEntryId ?? entry.id] : []));
-      for (const entry of ctx.sessionManager.getBranch()) {
-        if (entry.type !== "custom" || entry.customType !== type) continue;
-        const data = notification(entry.data);
-        const sourceEntryId = data.sourceEntryId ?? entry.id;
-        if (data.level === "info" || visible.has(sourceEntryId)) continue;
-        pi.appendEntry(type, { ...data, sourceEntryId });
-        visible.add(sourceEntryId);
-      }
-    };
-    pi.on("session_start", restore);
-    pi.on("session_tree", restore);
-    pi.on("session_compact", restore);
   }
+  const restore = (_event: unknown, ctx: ExtensionContext) => {
+    if (ctx.mode !== "tui") return;
+    const visible = new Set(ctx.sessionManager.buildContextEntries().flatMap(entry =>
+      entry.type === "custom" && types.has(entry.customType)
+        ? [`${entry.customType}:${notification(entry.data).sourceEntryId ?? entry.id}`] : []));
+    for (const entry of ctx.sessionManager.getBranch()) {
+      if (entry.type !== "custom" || !types.has(entry.customType)) continue;
+      const data = notification(entry.data);
+      const sourceEntryId = data.sourceEntryId ?? entry.id;
+      const key = `${entry.customType}:${sourceEntryId}`;
+      if (data.level === "info" || visible.has(key)) continue;
+      pi.appendEntry(entry.customType, { ...data, sourceEntryId });
+      visible.add(key);
+    }
+  };
+  pi.on("session_start", restore);
+  pi.on("session_tree", restore);
+  pi.on("session_compact", restore);
 }
