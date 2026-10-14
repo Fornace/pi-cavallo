@@ -5,7 +5,7 @@ Supports **HappyHorse 1.1/1.0**, **Wan 3.0**, and **Wan2.7**: text-to-video, ima
 
 ## Notification contract
 
-This source requires native Pi `NotificationMessageComponent` and `NOTIFICATION_ENTRY`. Generic notices are host-rendered UI-only data; no pi-fornace renderer bridge is required. Result messages keep their own data types. An older host fails explicitly and must be upgraded before this source is activated.
+Notices use official Pi TUI components through a bundled shared module. They render without loading pi-fornace or modifying Pi. New notices use a package-owned entry type; historical Fornace notices remain readable. `extensions/shared/fornace-messages.ts` is generated from the source identified in `SOURCE.json`, never edited independently.
 
 ## Models
 

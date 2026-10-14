@@ -2,6 +2,7 @@
 import assert from "node:assert";
 const registered = { tools: [], commands: [], renderers: [] };
 const pi = {
+	on: () => {},
 	registerTool: (t) => registered.tools.push(t),
 	registerCommand: (n, c) => registered.commands.push({ name: n, ...c }),
 	registerMessageRenderer: (t) => registered.renderers.push(t),

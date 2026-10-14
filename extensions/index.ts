@@ -4,7 +4,7 @@ import { readFile, mkdir } from "fs/promises";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { renderMessage } from "./message-ui.ts";
+import { registerMessageUI, renderMessage } from "./message-ui.ts";
 import { MODEL_IDS, inferCapability, specFor, type Capability } from "./models.ts";
 import { resolveDefaultModel, saveDefaultModel } from "./settings.ts";
 import { resolveVideoRoute, openaiVideoFlow } from "./providers.ts";
@@ -81,6 +81,7 @@ function resolveApiKey(ctx: any): string {
 }
 
 export default function (pi: ExtensionAPI) {
+  registerMessageUI(pi);
 	pi.registerCommand("cavallo-setup", {
 		description: "Interactive setup: point cavallo at an OpenAI-compatible video provider (URL + key, capability probe)",
 		handler: async (_args, ctx) => {
