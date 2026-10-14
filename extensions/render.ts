@@ -14,6 +14,6 @@ export function registerCavalloRenderer(pi: ExtensionAPI): void {
    if (!value || ((key === "error" || key === "outputPath") && text.includes(String(value)))) return [];
    return [label!.padEnd(10) + String(value)];
   }).join("\n");
-  return renderMessage(pi, text, theme, { level: details?.status === "Failed" ? "error" : "info", detail, expanded: options.expanded });
+  return renderMessage(text, theme, { level: details?.status === "Failed" ? "error" : "info", detail, expanded: options.expanded });
  });
 }

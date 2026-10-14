@@ -81,7 +81,7 @@ function resolveApiKey(ctx: any): string {
 }
 
 export default function (pi: ExtensionAPI) {
-	registerMessageUI(pi);
+  registerMessageUI(pi);
 	pi.registerCommand("cavallo-setup", {
 		description: "Interactive setup: point cavallo at an OpenAI-compatible video provider (URL + key, capability probe)",
 		handler: async (_args, ctx) => {
@@ -334,7 +334,7 @@ export default function (pi: ExtensionAPI) {
 		renderResult(result, _options, theme) {
 			const details = result.details as any;
 			const text = (result.content[0] as any)?.text || (details?.status === "Background" ? "Task running in background..." : "Success!");
-			return renderMessage(pi, text, theme, { level: details?.status === "Failed" ? "error" : "info" });
+			return renderMessage(text, theme, { level: details?.status === "Failed" ? "error" : "info" });
 		},
 	});
 }
