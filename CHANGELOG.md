@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.3
+
+- Keep progressing video downloads alive instead of aborting every transfer at two minutes.
+- Recover interrupted CDN GETs with the original strong ETag, length and exact byte range. Never resubmit a generation.
+- Preserve caller cancellation, original transfer errors, failed partial custody and exclusive final-file publication.
+
 ## 2.2.0
 
 > Premium fal H3 Max routing with safe, documented generation controls.

@@ -1,6 +1,6 @@
 // DashScope async video-synthesis API: submit, poll, download.
 // Shared by every model in the catalog (HappyHorse + Wan families).
-import { open, unlink } from "node:fs/promises";
+export { downloadVideo } from "./download.ts";
 import { setTimeout as delay } from "node:timers/promises";
 
 const DASHSCOPE_BASE = "https://dashscope-intl.aliyuncs.com/api/v1";
@@ -71,40 +71,4 @@ export async function pollUntilDone(model: string, apiKey: string, taskId: strin
 			onStatus(status);
 		}
 	}
-}
-
-export async function downloadVideo(url: string, outPath: string, signal?: AbortSignal): Promise<void> {
- const bounded = signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000);
- const limit = 512 * 1024 * 1024;
- const res = await fetch(url, { signal: bounded });
- if (!res.ok) throw new Error(`Download failed (${res.status}): ${res.statusText}`);
- if (!res.body) throw new Error("Video download has no body");
- const declared = res.headers.get("content-length");
- if (declared !== null && (!Number.isSafeInteger(Number(declared)) || Number(declared) < 1 || Number(declared) > limit)) {
-  await res.body.cancel();
-  throw new Error("Video download content length exceeds 512MiB bound or is invalid");
- }
- const stage = `${outPath}.partial`;
- let output;
- try { output = await open(stage, "wx", 0o600); }
- catch (error) { await res.body.cancel(); throw error; }
- let total = 0;
- try {
-  for await (const chunk of res.body) {
-   bounded.throwIfAborted();
-   total += chunk.length;
-   if (total > limit) throw new Error("Video download exceeded 512MiB bound");
-   await output.writeFile(chunk);
-  }
-  if (!total || (declared !== null && total !== Number(declared))) throw new Error("Video download size does not match declared content length");
-  await output.sync();
- } catch (error) {
-  await output.close();
-  // Retain the owned partial as failed custody, never present it as a completed video.
-  throw new Error(`Video download failed; partial retained at ${stage}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
- }
- await output.close();
- const { link } = await import("node:fs/promises");
- await link(stage, outPath); // Exclusive publication, never overwrite another output.
- await unlink(stage);
 }
