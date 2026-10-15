@@ -38,7 +38,15 @@ Run `/cavallo-setup` to submit video generation through an OpenAI-compatible gat
 "cavallo": { "baseUrl": "https://llm.fornace.net/v1", "apiKey": "sk-...", "model": "fornace-video" }
 ```
 
-The gateway route is text-to-video; DashScope stays the default for i2v, r2v, and video editing.
+The gateway route supports text-to-video everywhere, plus image inputs when the configured model is a verified MiniMax H3 route (`fornace-video`, `fornace-video-h3-max`):
+
+- `imagePath` (first frame) and `lastImagePath` map to `content` items with `role=first_frame` / `role=last_frame`.
+- `referenceImages` (1-9) map to `role=reference_image` items.
+- Frames and reference images are mutually exclusive; `lastImagePath` requires `imagePath`.
+- Local images load as base64 data URIs; `http(s)://` and `mm_file://` URLs pass through.
+- Requested vs effective aspect ratio: with first/last frames the upstream always derives the ratio from the input image (`adaptive`); a requested `aspectRatio` is sent but ignored upstream. Reference-to-video may request a concrete ratio (for example `16:9`); default `adaptive`.
+
+DashScope stays the route for every other input (`videoPath`, `firstClipPath`, `audioPath`) and model.
 
 ## Defaults and overrides
 

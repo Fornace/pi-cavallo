@@ -16,6 +16,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { downloadVideo } from "./task.ts";
 import { completedVideo, failedVideo, requireMediaBridge } from "./completion.ts";
+import { buildH3Content, hasH3ImageInputs, isH3VideoRoute } from "./h3.ts";
 
 export interface DeclaredVideoInputs {
  model?: string; imagePath?: string; lastImagePath?: string; videoPath?: string;
@@ -23,9 +24,13 @@ export interface DeclaredVideoInputs {
  negativePrompt?: string; promptExtend?: boolean; watermark?: boolean;
 }
 
-/** Until a first-party gateway input schema is verified, no declared unsupported input can disappear. */
+/** Until a first-party gateway input schema is verified, no declared unsupported input can disappear.
+ * Verified MiniMax H3 routes (fornace-video, fornace-video-h3-max) additionally accept the
+ * content-array image schema; every other flag and route stays rejected below. */
 export function assertGatewayInputs(config: OpenAiVideoConfig, inputs: DeclaredVideoInputs): void {
- const unsupported = ["imagePath", "lastImagePath", "videoPath", "firstClipPath", "audioPath", "referenceImages", "negativePrompt", "promptExtend", "watermark"] as const;
+ const unsupported: (keyof DeclaredVideoInputs)[] = isH3VideoRoute(config.model)
+  ? ["videoPath", "firstClipPath", "audioPath", "negativePrompt", "promptExtend", "watermark"]
+  : ["imagePath", "lastImagePath", "videoPath", "firstClipPath", "audioPath", "referenceImages", "negativePrompt", "promptExtend", "watermark"];
  const declared: string[] = unsupported.filter(key => inputs[key] !== undefined);
  if (inputs.model !== undefined && inputs.model !== config.model) declared.push("model");
  if (declared.length) throw new Error(`Selected Cavallo gateway ${config.baseUrl} (${config.model}) does not have a verified schema for: ${declared.join(", ")}. Nothing submitted; route unchanged.`);
@@ -84,12 +89,14 @@ export async function resolveVideoRoute(ctx: any): Promise<VideoRoute> {
 
 export async function videoSubmit(
 	config: OpenAiVideoConfig,
-	opts: DeclaredVideoInputs & { prompt: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; signal?: AbortSignal },
+	opts: DeclaredVideoInputs & { prompt: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; signal?: AbortSignal; cwd?: string },
 ): Promise<{ id: string; raw: any }> {
 	assertGatewayInputs(config, opts);
- const body: Record<string, unknown> = {
+	const useH3Content = isH3VideoRoute(config.model) && hasH3ImageInputs(opts);
+	const content = useH3Content ? await buildH3Content(opts.cwd ?? process.cwd(), opts.prompt, opts) : undefined;
+	const body: Record<string, unknown> = {
 		model: config.model,
-		prompt: opts.prompt,
+		...(content ? { content } : { prompt: opts.prompt }),
 		duration: opts.duration ?? 5,
 		resolution: opts.resolution ?? "768P",
 		aspect_ratio: opts.aspectRatio ?? "16:9",
@@ -146,7 +153,7 @@ export async function videoPoll(
 /** Submit + poll until terminal. Resolves with the finished video URL. */
 export async function openaiGenerateVideo(
 	config: OpenAiVideoConfig,
-	opts: DeclaredVideoInputs & { prompt: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; signal?: AbortSignal; onStatus?: (text: string) => void; onSubmitted?: (id: string) => void },
+	opts: DeclaredVideoInputs & { prompt: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; signal?: AbortSignal; cwd?: string; onStatus?: (text: string) => void; onSubmitted?: (id: string) => void },
 ): Promise<string> {
  const bounded = opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(8 * 60_000)]) : AbortSignal.timeout(8 * 60_000);
  const submit = await videoSubmit(config, { ...opts, signal: bounded });
@@ -168,12 +175,13 @@ export async function openaiGenerateVideo(
 }
 
 /** Full OpenAI-compat video flow used by cavallo_video's execute:
- * submit, poll, download, notify. Text-to-video only. */
+ * submit, poll, download, notify. Text-to-video plus MiniMax H3 image inputs
+ * (first/last frame, reference images) on verified H3 routes. */
 export async function openaiVideoFlow(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	config: OpenAiVideoConfig,
-	params: DeclaredVideoInputs & { prompt?: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; outputPath?: string },
+	params: DeclaredVideoInputs & { prompt?: string; duration?: number; resolution?: string; aspectRatio?: string; promptExpansionMode?: "balanced" | "quality"; seed?: number; outputPath?: string; cwd?: string },
 	signal: AbortSignal | undefined,
 	onUpdate?: any,
 ): Promise<{ content: { type: "text"; text: string }[]; details: Record<string, unknown> }> {
@@ -197,6 +205,7 @@ export async function openaiVideoFlow(
 	const videoUrl = await openaiGenerateVideo(config, {
 		...params,
   prompt: params.prompt ?? "",
+  cwd: params.cwd ?? ctx.cwd,
   onSubmitted: (id) => { taskId = id; pi.appendEntry("cavallo_job", { taskId: id, model: config.model, status: "Submitted" }); },
 		duration: params.duration,
 		resolution: params.resolution,

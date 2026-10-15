@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.3.0
+
+> MiniMax H3 image inputs on verified gateway routes.
+
+- Map `imagePath`/`lastImagePath`/`referenceImages` to the MiniMax H3 content array (`first_frame`, `last_frame`, `reference_image`) on `fornace-video` and `fornace-video-h3-max` gateway routes; text-only requests keep their exact previous body.
+- Validate before submission: frames cannot mix with references, `lastImagePath` requires `imagePath`, at most 9 reference images, no empty paths, non-empty prompt.
+- Local images resolve through the shared reference loader as base64 data URIs; `http(s)://` and `mm_file://` URLs pass through. The session cwd resolves relative paths end to end.
+- Document requested vs effective aspect ratio: H3 image-to-video is always `adaptive` upstream; reference-to-video may request a concrete ratio.
+
 ## 2.2.3
 
 - Keep progressing video downloads alive instead of aborting every transfer at two minutes.
