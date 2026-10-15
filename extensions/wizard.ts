@@ -62,7 +62,7 @@ export async function configureCavalloProvider(ctx: any, opts: ConfigureOptions)
 		`Configured cavallo on ${baseUrl}:`,
 		`  video model/group = ${model}`,
 		videoModels.length ? `  other video models: ${videoModels.join(", ")}` : "",
-		"cavallo_video text-to-video now uses this provider (i2v/r2v/edit stay on DashScope).",
+		"cavallo_video now uses this provider: text-to-video always, plus first/last-frame and reference images when the model is a verified H3 route (fornace-video, fornace-video-h3-max). Every other input stays on DashScope.",
 	].filter(Boolean).join("\n");
 }
 

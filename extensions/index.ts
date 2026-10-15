@@ -1,6 +1,5 @@
-import { resolve, isAbsolute, extname } from "path";
-import { existsSync } from "fs";
-import { readFile, mkdir } from "fs/promises";
+import { resolve, isAbsolute } from "path";
+import { mkdir } from "fs/promises";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -11,9 +10,9 @@ import { resolveVideoRoute, openaiVideoFlow } from "./providers.ts";
 import { runCavalloSetup, configureCavalloProvider } from "./wizard.ts";
 import { submitTask, pollUntilDone, downloadVideo } from "./task.ts";
 import { completedVideo, failedVideo, requireMediaBridge } from "./completion.ts";
+import { loadReferenceFile } from "./media.ts";
 import { registerCavalloRenderer } from "./render.ts";
 
-const SUPPORTED_INPUT_MIME = new Set(["image/png", "image/jpeg", "image/webp", "video/mp4", "video/webm"]);
 const DEFAULT_OUTPUT_DIR = "./generated";
 
 function slugify(text: string) {
@@ -22,33 +21,6 @@ function slugify(text: string) {
 
 function timestamp() {
 	return new Date().toISOString().replace(/[:.]/g, "-");
-}
-
-function mimeFromExt(path: string): string {
-	const ext = extname(path).toLowerCase();
-	switch (ext) {
-		case ".png": return "image/png";
-		case ".jpg":
-		case ".jpeg": return "image/jpeg";
-		case ".webp": return "image/webp";
-		case ".mp4": return "video/mp4";
-		case ".webm": return "video/webm";
-		default: return "image/png";
-	}
-}
-
-async function loadReferenceFile(cwd: string, pathArg: string): Promise<string> {
-	const cleaned = pathArg.replace(/^@/, "");
-	const abs = isAbsolute(cleaned) ? cleaned : resolve(cwd, cleaned);
-	if (!existsSync(abs)) throw new Error(`Reference file not found: ${abs}`);
-	const mimeType = mimeFromExt(abs);
-	if (!SUPPORTED_INPUT_MIME.has(mimeType)) throw new Error(`Unsupported reference file type: ${mimeType}.`);
-	const buf = await readFile(abs);
-	const sizeMB = buf.length / (1024 * 1024);
-	if (sizeMB > 50) {
-		console.warn(`[cavallo] Warning: ${abs} is ${sizeMB.toFixed(1)}MB. Large files are Base64-encoded into memory (~${(sizeMB * 1.33).toFixed(0)}MB). Consider using a public URL instead.`);
-	}
-	return `data:${mimeType};base64,${buf.toString("base64")}`;
 }
 
 async function resolveOutputPath(cwd: string, prompt: string | undefined, override: string | undefined): Promise<string> {
@@ -162,6 +134,7 @@ export default function (pi: ExtensionAPI) {
 			"Pass `imagePath` for Image-to-Video, `videoPath` for Video-Edit, `referenceImages` (up to 9) for Reference-to-Video.",
 			"Use 'wan3.0-video' or 'wan3.0-video-prime' for clips longer than 15s (up to 30s), first/last-frame stitching, or file/web-link references.",
 			"Use 'wan2.7-i2v-2026-04-25' with `lastImagePath`/`firstClipPath` for end-frame or continuation control.",
+			"On a configured H3 gateway route (fornace-video, fornace-video-h3-max), `imagePath`/`lastImagePath` and `referenceImages` (up to 9) submit through the gateway; frames and references cannot be mixed.",
 			"For Mantice H3 Max, prefer 768P, 16:9, 5 seconds, and balanced prompt expansion. The fal safety checker is always enabled by policy and cannot be disabled.",
 		],
 		parameters: Type.Object({
@@ -206,7 +179,8 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			// OpenAI-compatible provider (mantice etc.) when configured via /cavallo-setup.
-			// Currently text-to-video only; reference/image inputs need DashScope.
+			// Text-to-video plus MiniMax H3 image inputs (first/last frame, references)
+			// on verified H3 routes; every other input needs DashScope.
 			const route = await resolveVideoRoute(ctx);
 			if (route.kind === "openai-compat") {
 				return openaiVideoFlow(pi, ctx, route.config, {
