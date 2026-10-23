@@ -1,13 +1,14 @@
 // Stub-load cavallo: verify registration + pure logic without network.
 import assert from "node:assert";
-const registered = { tools: [], commands: [], renderers: [] };
+const registered = { tools: [], commands: [], renderers: [], entries: [], userMessages: [] };
 const pi = {
 	on: () => {},
 	registerTool: (t) => registered.tools.push(t),
 	registerCommand: (n, c) => registered.commands.push({ name: n, ...c }),
 	registerMessageRenderer: (t) => registered.renderers.push(t),
 	registerEntryRenderer: () => {},
-	sendUserMessage: () => {},
+	appendEntry: (type, data) => registered.entries.push({ type, data }),
+	sendUserMessage: (msg) => registered.userMessages.push(msg),
 };
 const { default: ext } = await import("../extensions/index.ts");
 ext(pi);
@@ -33,4 +34,11 @@ assert.equal(inferCapability({}), "t2v");
 assert.equal(DEFAULT_MODELS.t2v, "happyhorse-1.1-t2v");
 assert.equal(specFor("wan3.0-video").maxDuration, 30);
 assert.equal(specFor("happyhorse-1.1-t2v").resolutions.includes("480P"), true);
+// /cavallo-models displays via UI without triggering a paid model turn
+const modelsCmd = registered.commands.find(c => c.name === "cavallo-models");
+await modelsCmd.handler("", { hasUI: true, mode: "tui", ui: { notify: () => {} } });
+await modelsCmd.handler("bad-arg", { hasUI: true, mode: "tui", ui: { notify: () => {} } });
+await modelsCmd.handler("t2v=happyhorse-1.1-i2v", { hasUI: true, mode: "tui", ui: { notify: () => {} } });
+assert.equal(registered.userMessages.length, 0, "/cavallo-models must never inject a paid user turn");
+assert.equal(registered.entries.length, 3, "/cavallo-models emits UI notifications");
 console.log("CAVALLO LOAD TEST OK");

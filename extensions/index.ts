@@ -3,7 +3,7 @@ import { mkdir } from "fs/promises";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { registerMessageUI, renderMessage } from "./message-ui.ts";
+import { notify, registerMessageUI, renderMessage } from "./message-ui.ts";
 import { MODEL_IDS, inferCapability, specFor, type Capability } from "./models.ts";
 import { resolveDefaultModel, saveDefaultModel } from "./settings.ts";
 import { resolveVideoRoute, openaiVideoFlow } from "./providers.ts";
@@ -35,10 +35,10 @@ async function resolveOutputPath(cwd: string, prompt: string | undefined, overri
 	return resolve(dir, `${slugify(prompt || "video")}-${timestamp()}.mp4`);
 }
 
-function resolveApiKey(ctx: any): string {
+async function resolveApiKey(ctx: any): Promise<string> {
 	if (ctx.modelRegistry) {
 		try {
-			const k = ctx.modelRegistry.getApiKeyForProvider("alibaba-cloud");
+			const k = await ctx.modelRegistry.getApiKeyForProvider("alibaba-cloud");
 			if (k) return k;
 		} catch { /* fall through */ }
 	}
@@ -85,21 +85,21 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerCommand("cavallo-models", {
 		description: "List Cavallo video models, capabilities, and current defaults",
-		handler: async (args) => {
+		handler: async (args, ctx) => {
 			if (args?.trim()) {
 				const m = args.trim().match(/^(t2v|i2v|r2v|edit)\s*=\s*(\S+)$/);
 				if (!m) {
-					pi.sendUserMessage("Usage: /cavallo-models t2v=happyhorse-1.1-t2v (capabilities: t2v, i2v, r2v, edit)");
+					notify(pi, ctx, "Usage: /cavallo-models t2v=happyhorse-1.1-t2v (capabilities: t2v, i2v, r2v, edit)", "warning");
 					return;
 				}
 				const [, cap, model] = m;
 				const spec = specFor(model);
 				if (!spec || !spec.capabilities.includes(cap as Capability)) {
-					pi.sendUserMessage(`Model ${model} does not support ${cap}. Run /cavallo-models to see the catalog.`);
+					notify(pi, ctx, `Model ${model} does not support ${cap}. Run /cavallo-models to see the catalog.`, "error");
 					return;
 				}
 				await saveDefaultModel(cap as Capability, model);
-				pi.sendUserMessage(`Cavallo default for ${cap} is now ${model} (saved in settings.json).`);
+				notify(pi, ctx, `Cavallo default for ${cap} is now ${model} (saved in settings.json).`, "info");
 				return;
 			}
 			const lines = ["Cavallo video models (Alibaba Model Studio):", ""];
@@ -114,7 +114,7 @@ export default function (pi: ExtensionAPI) {
 				lines.push("");
 			}
 			lines.push("Override a default: /cavallo-models t2v=<model-id>  (or edit \"cavallo\" in settings.json)");
-			pi.sendUserMessage(lines.join("\n"));
+			notify(pi, ctx, lines.join("\n"), "info");
 		},
 	});
 
@@ -190,7 +190,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			await requireMediaBridge(pi, ctx, signal);
-   const apiKey = resolveApiKey(ctx);
+			const apiKey = await resolveApiKey(ctx);
 			const cwd = ctx.cwd;
 			const capability = inferCapability(params);
 			const model = params.model ?? resolveDefaultModel(capability).model;
