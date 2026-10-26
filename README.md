@@ -65,6 +65,7 @@ Omit `model` and the best default is picked automatically from the task type:
 
 ## Features
 
+- **Optional tool exposure**: `cavallo_video` and `cavallo_configure` register inside the `fornace-video` namespace as optional tools. A session carries one family line and their names; the full declaration and prompt guidance appear once a load (native `tool_search`, codemode `searchTools()`, or `tool_load`) names them. Explicit selection such as `--tools cavallo_video` declares the tool directly.
 - **Non-blocking Execution**: Submits to DashScope and polls in the background, freeing up the chat.
 - **Smart Thumbnails**: Automatically extracts and displays a thumbnail when the video finishes downloading using `ffmpeg` (if installed).
 - **Finder Integration**: Clickable markdown links to quickly reveal the exported video in Finder without launching it (`open -R`).

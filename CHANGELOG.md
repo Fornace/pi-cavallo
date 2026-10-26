@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Register `cavallo_video` and `cavallo_configure` as deferred tools in the `fornace-video` namespace. Names, parameters, executors, rendering, prompt snippets and guidelines are unchanged; a session carries one family line and gets the full declaration and guidance when a load names the tool, while explicit selection (`--tools`) still declares it.
+
 ## 2.3.0
 
 > MiniMax H3 image inputs on verified gateway routes.

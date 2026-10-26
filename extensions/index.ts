@@ -15,6 +15,21 @@ import { registerCavalloRenderer } from "./render.ts";
 
 const DEFAULT_OUTPUT_DIR = "./generated";
 
+/**
+ * Both cavallo tools are registered as native deferred tools in one Fornace
+ * namespace: they stay callable and keep their exact names, schemas, executors
+ * and prompt guidelines, but are undeclared until a load names them, so the
+ * model sees one family index line instead of two full declarations. The
+ * guidelines appear with the tool once it is loaded.
+ *
+ * Spread, not inline fields: the pinned typecheck dependency describes the tool
+ * definition without `exposure` and `namespace` and rejects unknown properties.
+ */
+const VIDEO_TOOLS = {
+	exposure: "deferred",
+	namespace: { name: "fornace-video", description: "Video generation and provider configuration" },
+} as const;
+
 function slugify(text: string) {
 	return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").substring(0, 40) || "video";
 }
@@ -68,6 +83,7 @@ export default function (pi: ExtensionAPI) {
 			"Configure cavallo to submit video generation through an OpenAI-compatible gateway (mantice) instead of DashScope. " +
 			"Probes the endpoint and saves the route. Call this when the user asks to set up or switch the video provider.",
 		promptSnippet: "Configure the cavallo video provider (mantice) non-interactively.",
+		...VIDEO_TOOLS,
 		parameters: Type.Object({
 			baseUrl: Type.String({ description: "OpenAI-compatible base URL, e.g. https://llm.fornace.net/v1" }),
 			apiKey: Type.Optional(Type.String({
@@ -137,6 +153,7 @@ export default function (pi: ExtensionAPI) {
 			"On a configured H3 gateway route (fornace-video, fornace-video-h3-max), `imagePath`/`lastImagePath` and `referenceImages` (up to 9) submit through the gateway; frames and references cannot be mixed.",
 			"For Mantice H3 Max, prefer 768P, 16:9, 5 seconds, and balanced prompt expansion. The fal safety checker is always enabled by policy and cannot be disabled.",
 		],
+		...VIDEO_TOOLS,
 		parameters: Type.Object({
 			model: Type.Optional(StringEnum(MODEL_IDS, {
 				description: "Model id. Omit to auto-select the best default for the detected task type, or set persistent defaults via /cavallo-models.",
