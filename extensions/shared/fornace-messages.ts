@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 import { Text, stripTerminalSequences, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 
 export type NotificationLevel = "info" | "warning" | "error";
-export interface NotificationData { text: string; level: NotificationLevel; sourceEntryId?: string }
+export interface NotificationData { text: string; level: NotificationLevel; sourceEntryId?: string; surface?: "messages" }
 export interface MessageOptions { level?: NotificationLevel; detail?: string; expanded?: boolean }
 const labels = { info: "Info", warning: "Warning", error: "Error" } as const;
 const colors = { info: "accent", warning: "warning", error: "error" } as const;
@@ -52,9 +52,10 @@ export function renderMessage(text: string, theme: Theme, options: MessageOption
 export function registerNotificationUI(pi: ExtensionAPI, entryType: string): void {
   const types = new Set([entryType, "pi-fornace:notification"]);
   for (const type of types) {
-    pi.registerEntryRenderer<NotificationData>(type, (entry, options, theme) => {
+    pi.registerEntryRenderer<NotificationData>(type, (entry, renderOptions, theme) => {
       const data = notification(entry.data);
-      return renderMessage(data.text, theme, { level: data.level, expanded: options.expanded });
+      if (data.surface === "messages") return undefined;
+      return renderMessage(data.text, theme, { level: data.level, expanded: renderOptions.expanded });
     });
   }
   const restore = (_event: unknown, ctx: ExtensionContext) => {
@@ -67,7 +68,7 @@ export function registerNotificationUI(pi: ExtensionAPI, entryType: string): voi
       const data = notification(entry.data);
       const sourceEntryId = data.sourceEntryId ?? entry.id;
       const key = `${entry.customType}:${sourceEntryId}`;
-      if (data.level === "info" || visible.has(key)) continue;
+      if (data.level === "info" || data.surface === "messages" || visible.has(key)) continue;
       pi.appendEntry(entry.customType, { ...data, sourceEntryId });
       visible.add(key);
     }
