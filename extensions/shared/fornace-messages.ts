@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { Text, stripTerminalSequences, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 
 export type NotificationLevel = "info" | "warning" | "error";
@@ -48,32 +48,17 @@ export function renderMessage(text: string, theme: Theme, options: MessageOption
   return new FornaceMessage(text, theme, options.level, options.detail, options.expanded);
 }
 
-/** Each package owns new entry IDs. Legacy records render without any sibling listener. */
+/** Each package owns new entry IDs. Legacy records render without any sibling listener.
+ * Re-copied notifications (sourceEntryId) and pre-surface update errors stay off the transcript. */
 export function registerNotificationUI(pi: ExtensionAPI, entryType: string): void {
   const types = new Set([entryType, "pi-fornace:notification"]);
   for (const type of types) {
     pi.registerEntryRenderer<NotificationData>(type, (entry, renderOptions, theme) => {
       const data = notification(entry.data);
-      if (data.surface === "messages") return undefined;
+      if (data.surface === "messages" || data.sourceEntryId) return undefined;
+      if (entry.type === "custom" && data.text.startsWith("Fornace native update ")) return undefined;
+      if (entry.type === "custom" && data.text.startsWith("Error: Native update exited ")) return undefined;
       return renderMessage(data.text, theme, { level: data.level, expanded: renderOptions.expanded });
     });
   }
-  const restore = (_event: unknown, ctx: ExtensionContext) => {
-    if (ctx.mode !== "tui") return;
-    const visible = new Set(ctx.sessionManager.buildContextEntries().flatMap(entry =>
-      entry.type === "custom" && types.has(entry.customType)
-        ? [`${entry.customType}:${notification(entry.data).sourceEntryId ?? entry.id}`] : []));
-    for (const entry of ctx.sessionManager.getBranch()) {
-      if (entry.type !== "custom" || !types.has(entry.customType)) continue;
-      const data = notification(entry.data);
-      const sourceEntryId = data.sourceEntryId ?? entry.id;
-      const key = `${entry.customType}:${sourceEntryId}`;
-      if (data.level === "info" || data.surface === "messages" || visible.has(key)) continue;
-      pi.appendEntry(entry.customType, { ...data, sourceEntryId });
-      visible.add(key);
-    }
-  };
-  pi.on("session_start", restore);
-  pi.on("session_tree", restore);
-  pi.on("session_compact", restore);
 }
